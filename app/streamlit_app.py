@@ -206,12 +206,16 @@ if prompt := st.chat_input("Ask a question about your math textbooks..."):
                 answer = response['answer']
                 sources = response['sources']
                 
-                # Simulate stream
-                for chunk in answer.split():
-                    full_response += chunk + " "
-                    time.sleep(0.02)
-                    message_placeholder.markdown(full_response + "▌")
-                message_placeholder.markdown(full_response)
+                # Simulate stream while preserving structure
+                for i in range(len(answer)):
+                    full_response = answer[:i+1]
+                    # We can't actually sleep for every character if it's too long, 
+                    # so let's update every few characters for efficiency
+                    if i % 5 == 0 or i == len(answer) - 1:
+                        message_placeholder.markdown(full_response + "▌")
+                        time.sleep(0.005)
+                message_placeholder.markdown(answer)
+                full_response = answer
                 
                 # Show sources
                 if sources:

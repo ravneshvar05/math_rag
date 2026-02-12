@@ -314,35 +314,55 @@ class MathRAGPipeline:
 
     def _post_process_answer(self, text: str) -> str:
         """
-        Clean up LLM response formatting.
-        
-        Args:
-            text: Raw LLM response
-            
-        Returns:
-            Cleaned response
+        Clean up LLM response formatting while protecting LaTeX and structural blocks.
         """
         import re
         
-        # 0. Clean up potential weird artifacts like "— -"
+        # 0. Placeholder-based protection for LaTeX
+        latex_placeholders = {}
+        
+        def protect_latex(match):
+            placeholder = f"__LATEX_PH_{len(latex_placeholders)}__"
+            latex_placeholders[placeholder] = match.group(0)
+            return placeholder
+
+        # Protect block math $$...$$
+        text = re.sub(r'\$\$.*?\$\$', protect_latex, text, flags=re.DOTALL)
+        # Protect inline math $...$
+        text = re.sub(r'\$.*?\$', protect_latex, text)
+        
+        # 1. Clean up potential weird artifacts
         text = text.replace('— -', '\n\n')
         
-        # 1. Force newlines before Headers (### or ####)
+        # 2. Force newlines before Headers (### or ####)
         text = re.sub(r'\s*(#{3,4})\s*', r'\n\n\1 ', text)
         
-        # 2. Force newlines before Bullet Points (* or -)
-        # Matches a bullet (*) or hyphen (-) at the start of a sentence or phrase
-        text = re.sub(r'([^\n])\s*([\*\-])\s+', r'\1\n\2 ', text)
+        # 3. Force newlines before Bullet Points (* or -) IF NOT inside a blockquote
+        # We avoid matching if preceded by '>' (part of blockquote)
+        text = re.sub(r'([^>\n])\s*([\*\-])\s+', r'\1\n\2 ', text)
         
-        # 3. Force newlines before Numbered Lists (1., 2., etc.)
-        # Look for digit-dot-space pattern. Avoid matching 2.5 (decimals)
-        # We match a preceding space/char, then a digit, a literal dot, and a space.
-        text = re.sub(r'([^\n])\s+(\d+\.\s)', r'\1\n\2', text)
+        # 4. Force newlines before Numbered Lists (1., 2., etc.) IF NOT inside a blockquote
+        text = re.sub(r'([^>\n])\s+(\d+\.\s)', r'\1\n\2', text)
         
-        # 4. Fix "Step X:" patterns that might be inline
-        text = re.sub(r'([^\n])\s*(Step \d+:)', r'\1\n\n**\2**', text)
+        # 5. Fix "Step X:" patterns that might be inline
+        text = re.sub(r'([^>\n])\s*(Step \d+:)', r'\1\n\n**\2**', text)
         
-        # 5. Clean up excessive newlines (more than 2 becomes 2)
+        # 6. Clean up excessive newlines
+        text = re.sub(r'\n{3,}', '\n\n', text)
+        
+        # 7. Restore LaTeX and ensure block math has newlines
+        for placeholder, original in latex_placeholders.items():
+            if original.startswith('$$'):
+                # Ensure block math is on its own line
+                replacement = f"\n\n{original}\n\n"
+                text = text.replace(placeholder, replacement)
+            else:
+                text = text.replace(placeholder, original)
+        
+        # 8. Final check: Ensure blockquotes are properly formatted if they were broken
+        # (Though the [^>] above should prevent most issues)
+        
+        # Final cleanup of excessive newlines after restoration
         text = re.sub(r'\n{3,}', '\n\n', text)
         
         return text.strip()

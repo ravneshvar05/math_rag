@@ -1,0 +1,12 @@
+### Sets Introduction
+
+#### Properties of Sets
+- A set is a collection.
+- It is unique.
+
+#### 📝 Step-by-Step Solution:
+> 1. Identify the universal set $U$.
+> 2. Find elements not in $A$.
+> 3. List them as $A'$.
+
+#### ✅ Final Answer: $A' = \{2, 4, 6\}$.
