@@ -162,6 +162,20 @@ class StructureAwareChunker:
         text1 = block1.get('text', '')
         text2 = block2.get('text', '')
         
+        # 1. HARD SPLIT: If current block is Exercise Header, it starts NEW chunk.
+        # (This separates it from previous text, forcing a break even if inside a proof)
+        is_header_2 = self._is_exercise_header(text2)
+        if is_header_2:
+            return False
+            
+        # 2. HARD KEEP (GLUE): If previous block is Exercise Header, it GLUES to next.
+        if self._is_exercise_header(text1):
+            return True
+
+        # 3. HARD KEEP: Table-like rows should try to stay together
+        if self._is_table_row(text1) and self._is_table_row(text2):
+            return True
+        
         # Don't split proofs
         if self.math_detector.is_proof(text1) or self.math_detector.is_proof(text2):
             return True
@@ -184,6 +198,45 @@ class StructureAwareChunker:
             return True
         
         return False
+
+    def _is_exercise_header(self, text: str) -> bool:
+        """Check if text is an Exercise header."""
+        # Standard: "EXERCISE 3.1"
+        if re.search(r'^\s*EXERCISE\s+\d+(\.\d+)?', text, re.IGNORECASE):
+            return True
+            
+        # Miscellaneous: "Miscellaneous Exercise on Chapter 3"
+        if re.search(r'^\s*Miscellaneous\s+Exercise', text, re.IGNORECASE):
+            return True
+            
+        return False
+
+    def _is_table_row(self, text: str) -> bool:
+        """Check if text looks like a row in a math table."""
+        # Heuristic: Multiple numbers separated by spaces/tabs, or very short text
+        # e.g. "30° 45° 60°" or "0 1/2 1/√2"
+        if len(text) < 50:
+            # Count numbers
+            numbers = len(re.findall(r'\d+', text))
+            if numbers >= 2:
+                return True
+        return False
+
+    def _extract_example_info(self, text: str) -> Optional[str]:
+        """Extract example number."""
+        # Updated regex to handle potential newlines and various separators
+        patterns = [
+            r'Example\s*[:.-]?\s*(\d+(?:\.\d+)?)', 
+            r'Example\s+[\r\n]+\s*(\d+(?:\.\d+)?)', # Handle header split across lines
+            r'Ex\s*[:.-]?\s*(\d+(?:\.\d+)?)',
+            r'Example\s+(\d+)', # Simple "Example 4" followed by text
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                return match.group(1)
+        return None
     
     def _create_chunk_from_blocks(
         self,
@@ -408,17 +461,3 @@ class StructureAwareChunker:
         
         return type_map.get(type_str, ContentType.TEXT)
 
-    def _extract_example_info(self, text: str) -> Optional[str]:
-        """Extract example number."""
-        # Updated regex to handle potential newlines and various separators
-        patterns = [
-            r'Example\s*[:.-]?\s*(\d+(?:\.\d+)?)', 
-            r'Example\s+[\r\n]+\s*(\d+(?:\.\d+)?)', # Handle header split across lines
-            r'Ex\s*[:.-]?\s*(\d+(?:\.\d+)?)',
-        ]
-        
-        for pattern in patterns:
-            match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                return match.group(1)
-        return None

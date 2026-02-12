@@ -81,6 +81,12 @@ def debug_retrieval():
         hybrid_retriever.keyword_retriever.index_chunks(all_chunks)
         
         # Execute Retrieve
+        print(f"Query: 'give me example 1'")
+        if hybrid_retriever._is_entity_query("give me example 1"):
+             print("DEBUG: Entity Query Detected! Alpha should be 0.3")
+        else:
+             print("DEBUG: Concept Query Detected. Alpha should be 0.7")
+             
         results = hybrid_retriever.retrieve("give me example 1")
         
         if results:

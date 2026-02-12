@@ -66,6 +66,16 @@ class HybridRetriever:
         k = top_k or self.top_k
         logger.info(f"Hybrid retrieving top {k} results for query: {query[:50]}...")
         
+        # 1. Dynamic Weighting Logic
+        # Default to configured alpha (usually 0.7 favoring vector)
+        current_alpha = self.alpha
+        
+        # Check if query is "Entity-Heavy" (specific lookup)
+        is_entity_query = self._is_entity_query(query)
+        if is_entity_query:
+            logger.info("Detected Entity Query (Example/Exercise) -> Boosting Keyword Search")
+            current_alpha = 0.3 # Favor Keyword (0.3 Vector, 0.7 Keyword)
+            
         # 1. Vector Search
         query_embedding = self.embedding_generator.generate_embedding(query)
         if filters:
@@ -78,21 +88,16 @@ class HybridRetriever:
         # 2. Keyword Search
         keyword_results = self.keyword_retriever.search(query, top_k=k * 2)
         
-        # 3. Fuse Scores (Reciprocal Rank Fusion or Weighted Sum)
-        # using Weighted Sum here for simplicity and control
-        # Normalize scores first? BM25 is unbounded, Vector is cosine (0-1).
-        # Better to use Reciprocal Rank Fusion (RRF) which is robust to scale differences.
-        
+        # 3. Fuse Scores
         fused_scores = {}
         
         # Helper for RRF
         def apply_rrf(results, rank_constant=60, weight=1.0):
             for rank, (chunk_id, _) in enumerate(results):
                 if filters:
-                    # Double check filter for keyword results (since BM25 doesn't pre-filter)
+                    # Double check filter for keyword results
                     chunk = self.metadata_store.get_chunk(chunk_id)
                     if not chunk: continue
-                    # Check if chunk matches filters
                     match = True
                     for key, val in filters.items():
                         if chunk.get(key) != val:
@@ -104,8 +109,8 @@ class HybridRetriever:
                     fused_scores[chunk_id] = 0.0
                 fused_scores[chunk_id] += weight * (1 / (rank_constant + rank + 1))
 
-        apply_rrf(vector_results, weight=self.alpha) # Vector weight
-        apply_rrf(keyword_results, weight=(1.0 - self.alpha)) # Keyword weight
+        apply_rrf(vector_results, weight=current_alpha)
+        apply_rrf(keyword_results, weight=(1.0 - current_alpha))
         
         # Sort by fused score
         sorted_results = sorted(fused_scores.items(), key=lambda x: x[1], reverse=True)[:k]
@@ -150,6 +155,26 @@ class HybridRetriever:
             top_k=top_k,
             filters={'content_type': content_type}
         )
+
+    def _is_entity_query(self, query: str) -> bool:
+        """
+        Check if query is asking for a specific entity (Example X, Exercise Y).
+        """
+        import re
+        # patterns for "Example 5", "Ex 5.1", "Exercise 3.2", "Q 1"
+        patterns = [
+            r'example\s*\d+',
+            r'ex\s*\d+',
+            r'exercise\s*\d+',
+            r'question\s*\d+',
+            r'q\s*\d+',
+            r'problem\s*\d+'
+        ]
+        
+        for pattern in patterns:
+            if re.search(pattern, query, re.IGNORECASE):
+                return True
+        return False
     
     def retrieve_from_chapter(
         self,
