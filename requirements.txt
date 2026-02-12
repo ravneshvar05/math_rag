@@ -1,0 +1,43 @@
+# PDF Processing
+PyMuPDF>=1.23.0
+pdfplumber>=0.10.0
+pdf2image>=1.16.0
+
+# OCR
+pytesseract>=0.3.10
+Pillow>=10.0.0
+
+# Math & Text Processing
+sympy>=1.12
+latex2mathml>=3.76.0
+pix2text>=1.0.0
+
+# Embeddings & Vector Store
+sentence-transformers>=2.2.2
+faiss-cpu
+torch>=2.1.0
+transformers>=4.35.0
+
+# LLM
+groq>=0.4.0
+
+# Data Processing
+pandas>=2.1.0
+numpy>=1.26.0
+opencv-python>=4.8.0
+
+# Config & Environment
+python-dotenv>=1.0.0
+pyyaml>=6.0.0
+
+# Utilities
+tqdm>=4.66.0
+tenacity>=8.2.0
+loguru>=0.7.0
+
+# Testing
+pytest>=7.4.0
+pytest-cov>=4.1.0
+
+# UI
+streamlit>=1.31.0
