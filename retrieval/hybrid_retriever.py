@@ -12,8 +12,10 @@ from utils.logging import get_logger
 logger = get_logger(__name__)
 
 
+from retrieval.keyword_retriever import KeywordRetriever
+
 class HybridRetriever:
-    """Hybrid retrieval combining vector search and metadata filtering."""
+    """Hybrid retrieval combining vector search, keyword search, and metadata filtering."""
     
     def __init__(
         self,
@@ -36,10 +38,13 @@ class HybridRetriever:
         self.embedding_generator = embedding_generator
         self.config = config
         
+        self.keyword_retriever = KeywordRetriever(config)
+        
         self.top_k = config.get('top_k', 5)
         self.similarity_threshold = config.get('similarity_threshold', 0.7)
+        self.alpha = config.get('alpha', 0.7) # Vector weight (0.0 to 1.0)
         
-        logger.info("Initialized hybrid retriever")
+        logger.info("Initialized hybrid retriever (Vector + Keyword)")
     
     def retrieve(
         self,
@@ -48,7 +53,7 @@ class HybridRetriever:
         filters: Optional[Dict[str, Any]] = None
     ) -> List[RetrievalResult]:
         """
-        Retrieve relevant chunks for query.
+        Retrieve relevant chunks using Hybrid Search (Vector + Keyword).
         
         Args:
             query: Search query
@@ -59,41 +64,57 @@ class HybridRetriever:
             List of retrieval results
         """
         k = top_k or self.top_k
+        logger.info(f"Hybrid retrieving top {k} results for query: {query[:50]}...")
         
-        logger.info(f"Retrieving top {k} results for query: {query[:50]}...")
-        
-        # Generate query embedding
+        # 1. Vector Search
         query_embedding = self.embedding_generator.generate_embedding(query)
-        
-        # Apply metadata filtering if specified
-        # Apply metadata filtering if specified
         if filters:
             filtered_chunks = self.metadata_store.filter_chunks(**filters)
             filtered_ids = [chunk['chunk_id'] for chunk in filtered_chunks]
-            
-            # Search with filter
-            results = self.vector_store.search_with_filter(
-                query_embedding,
-                k,
-                filtered_ids
-            )
+            vector_results = self.vector_store.search_with_filter(query_embedding, k * 2, filtered_ids)
         else:
-            # Standard search
-            results = self.vector_store.search(query_embedding, k)
+            vector_results = self.vector_store.search(query_embedding, k * 2)
+            
+        # 2. Keyword Search
+        keyword_results = self.keyword_retriever.search(query, top_k=k * 2)
         
-        # Apply similarity threshold
-        results = [
-            (chunk_id, score)
-            for chunk_id, score in results
-            if score >= self.similarity_threshold
-        ]
+        # 3. Fuse Scores (Reciprocal Rank Fusion or Weighted Sum)
+        # using Weighted Sum here for simplicity and control
+        # Normalize scores first? BM25 is unbounded, Vector is cosine (0-1).
+        # Better to use Reciprocal Rank Fusion (RRF) which is robust to scale differences.
+        
+        fused_scores = {}
+        
+        # Helper for RRF
+        def apply_rrf(results, rank_constant=60, weight=1.0):
+            for rank, (chunk_id, _) in enumerate(results):
+                if filters:
+                    # Double check filter for keyword results (since BM25 doesn't pre-filter)
+                    chunk = self.metadata_store.get_chunk(chunk_id)
+                    if not chunk: continue
+                    # Check if chunk matches filters
+                    match = True
+                    for key, val in filters.items():
+                        if chunk.get(key) != val:
+                            match = False
+                            break
+                    if not match: continue
+                
+                if chunk_id not in fused_scores:
+                    fused_scores[chunk_id] = 0.0
+                fused_scores[chunk_id] += weight * (1 / (rank_constant + rank + 1))
+
+        apply_rrf(vector_results, weight=self.alpha) # Vector weight
+        apply_rrf(keyword_results, weight=(1.0 - self.alpha)) # Keyword weight
+        
+        # Sort by fused score
+        sorted_results = sorted(fused_scores.items(), key=lambda x: x[1], reverse=True)[:k]
         
         # Get chunks and create retrieval results
         retrieval_results = []
-        for rank, (chunk_id, score) in enumerate(results, 1):
+        for rank, (chunk_id, score) in enumerate(sorted_results, 1):
             chunk_data = self.metadata_store.get_chunk(chunk_id)
             if chunk_data:
-                # Convert dict to ContentChunk object
                 try:
                     chunk = ContentChunk.from_dict(chunk_data)
                     retrieval_results.append(RetrievalResult(
@@ -104,7 +125,7 @@ class HybridRetriever:
                 except Exception as e:
                     logger.error(f"Error converting chunk {chunk_id}: {e}")
         
-        logger.info(f"Retrieved {len(retrieval_results)} results")
+        logger.info(f"Retrieved {len(retrieval_results)} hybrid results")
         return retrieval_results
     
     def retrieve_by_type(
@@ -364,6 +385,16 @@ class RetrievalPipeline:
                 )
                 if results:
                     return results
+                
+                # If specific example not found in metadata, simple generic search is often better 
+                # than 'retrieve_by_type' which might return wrong examples.
+                # However, let's allow it to fall through but prioritize general search if we had a specific target number.
+                logger.info(f"Example {ex_num} not found via strict metadata. Falling back to general search.")
+                return self.retriever.retrieve(
+                    query=query,
+                    top_k=top_k,
+                    filters=filters if filters else None
+                )
         
         # Retrieve based on type
         if query_type in ['definition', 'theorem', 'formula', 'example']:

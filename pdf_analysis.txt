@@ -1,0 +1,412 @@
+Analyzing: data\raw\Mathematics-11 1-151-175.pdf
+Total Pages: 25
+
+--- Page 1 ---
+vG eometry, as a logical system, is a means and even the most powerful
+means to make children feel the strength of the human spirit that is
+of their own spirit.  – H. FREUDENTHALv
+9.1  Introduction
+We are familiar with two-dimensional coordinate geometry
+from earlier classes. Mainly, it is a combination of algebra
+and geometry. A systematic study of geometry by the use
+of algebra was first carried out by celebrated French
+philosopher and mathematician René Descartes, in his book
+‘La Géométry, published in 1637. This book introduced the
+notion of the equation of a curve and related analytical
+methods into the study of geometry. The resulting
+combination of analysis and geometry is referred now as
+analytical geometry. In the earlier classes, we initiated
+the study of coordinate geometry, where we   studied about
+coordinate axes, coordinate plane, plotting of points in a
+plane, distance between two points, section formulae, etc. All these concepts are the
+basics of coordinate geometry.
+Le
+
+[Targeted Search for 'Example']
+
+--- Page 2 ---
+152
+MATHEMATICS
+I.
+Distance between the points P (x1,  y1) and Q (x2, y2) is
+(
+)
+(
+)
+1
+2
+2
+2
+2
+1
+PQ
+x – x
+y – y
+=
++
+For example, distance between the points (6, – 4) and (3, 0) is
+(
+)
+(
+)
+2
+2
+3
+6
+0
+4
+9
+16
+5
+−
++
++
+=
++
+=
+ units.
+II.
+The coordinates of a point dividing the line segment joining the points (x1,  y1)
+and (x2, y2) internally, in the ratio m: n are 
+
+
+
+
+
+
++
++
++
++
+n
+m
+y
+n
+y
+m
+n
+m
+x
+n
+x
+m
+1
+2
+1
+2
+,
+.
+For example, the coordinates of the point which divides the line segment joining
+A  (1, –3) and B (–3, 9) internally, in the ratio 1: 3 are given by 
+1 (
+3)
+3 1
+0
+1 3
+.
+.
+x
+−
++
+=
+=
++
+and 
+(
+)
+1.9 + 3. –3
+=
+= 0.
+1+ 3
+y
+III.   In particular, if m = n, the coordinates of the mid-point of the line segment
+joining the points (x1,  y1) and (x2, y2) are 
+
+
+
+
+
+
++
++
+2
+,
+2
+2
+1
+2
+1
+y
+y
+x
+x
+.
+IV.
+Area of the triangle whose vertices are (x1,  y1), (x2, y2) and (x3, y3) is
+(
+)
+(
+)
+(
+)
+1
+2
+3
+2
+3
+3
+1
+1
+2
+1
+2
+−
++
+−
++
+−
+y
+y
+y
+y
+y
+y
+x
+x
+x
+.
+For example, the area of the triangle, whose ve
+
+[Targeted Search for 'Example']
+FOUND: 'For example, distance between the points (6, – 4) and (3, 0) is'
+FOUND: 'For example, the coordinates of the point which divides the line segment joining'
+FOUND: 'For example, the area of the triangle, whose vertices are (4, 4), (3, – 2) and (– 3, 16) is'
+
+--- Page 3 ---
+STRAIGHT LINES       153
+The angle (say) θ made by the line l with positive
+direction of x-axis and measured anti clockwise
+is called the inclination of the line. Obviously
+0° ≤ θ ≤ 180° (Fig 9.2).
+We observe that lines parallel to x-axis, or
+coinciding with x-axis, have inclination of 0°. The
+inclination of a vertical line (parallel to or
+coinciding with y-axis) is 90°.
+Definition 1 If θ is the inclination of a line
+l, then tan θ is called the slope or gradient of
+the line l.
+The slope of a line whose inclination is 90° is not
+defined.
+The slope of a line is denoted by m.
+Thus, m = tan θ, θ ≠ 90°
+It may be observed that the slope of x-axis is zero and slope of y-axis is not defined.
+9.2.1 Slope of a line when coordinates of any two points on the line are given
+We know that a line is completely determined when we are given two points on it.
+Hence, we proceed to find the slope of a
+line in terms of the coordinates of two points
+on the line.
+Let P(x1, y1) and Q(x2, y2) be two
+points on n
+
+[Targeted Search for 'Example']
+
+--- Page 4 ---
+154
+MATHEMATICS
+From equations (1) and (2), we have
+2
+1
+2
+1
+.
+y
+y
+m
+x
+x
+−
+=
+−
+Case II  When angle θ is obtuse:
+In Fig 9.3 (ii), we have
+ ∠MPQ = 180° –  θ.
+Therefore,  θ = 180° – ∠MPQ.
+Now, slope of the line l
+              m = tan θ
+= tan ( 180° – ∠MPQ) = – tan  ∠MPQ
+=
+2
+1
+1
+2
+MQ
+MP
+y
+y
+x
+x
+−
+−
+= −
+−
+ = 
+2
+1
+2
+1
+y
+y .
+x
+x
+−
+−
+Consequently, we see that in both the cases the slope m of the line through the points
+(x1, y1) and (x2, y2) is given by  
+2
+1
+2
+1
+y
+y
+m
+x
+x
+−
+=
+−
+.
+9.2.2 Conditions for parallelism and perpendicularity of lines in terms of their
+slopes In a coordinate plane, suppose that non-vertical lines l1 and l2 have slopes m1
+and m2, respectively. Let their inclinations be α and
+β, respectively.
+If the line l1 is parallel to l2 (Fig 9.4), then their
+inclinations are equal, i.e.,
+α = β, and hence, tan α = tan β
+Therefore
+m1 = m2, i.e., their slopes are equal.
+Conversely, if the slope of two lines l1 and l2
+is same, i.e.,
+m1 = m2.
+Then
+tan α = tan β.
+By the property of tangent
+
+[Targeted Search for 'Example']
+
+--- Page 5 ---
+STRAIGHT LINES       155
+Hence, two non vertical lines l1 and l2 are parallel if and only if their slopes
+are equal.
+If the lines l1 and l2 are perpendicular (Fig 9.5), then β = α + 90°.
+Therefore, tan β = tan (α + 90°)
+= – cot α = 
+1
+tanα
+−
+i.e.,
+m2 = 
+1
+1
+m
+−
+or
+m1  m2  = – 1
+Conversely, if m1  m2  =  – 1, i.e., tan α tan β = – 1.
+Then tan α = – cot β = tan (β + 90°) or tan (β – 90°)
+Therefore,
+α  and β differ by 90°.
+Thus, lines l1 and l2 are perpendicular to each other.
+Hence, two non-vertical lines are perpendicular to each other if and only if
+their slopes are negative reciprocals of each other,
+i.e.,
+m2= 
+1
+1
+m
+−
+ or,  m1 m2 = – 1.
+Let us consider the following example.
+Example 1 Find the slope of the lines:
+(a)
+Passing through the points (3, – 2) and (–1, 4),
+(b)
+Passing through the points (3, – 2) and (7, – 2),
+(c)
+Passing through the points (3, – 2) and (3, 4),
+(d)
+Making inclination of 60° with the positive direction of x-axis.
+Solution (a) The slope of the line through (3, 
+
+[Targeted Search for 'Example']
+FOUND: 'Let us consider the following example.'
+FOUND: 'Example 1 Find the slope of the lines:'
+
+--- Page 6 ---
+156
+MATHEMATICS
+4 – (–2)
+6
+=
+=
+3 – 3
+0
+m
+, which is not defined.
+(d) Here inclination of the line α = 60°. Therefore, slope of the line is
+m = tan 60° = 
+3 .
+9.2.3 Angle between two lines When we think about more than one line in a plane,
+then we find that these lines are either intersecting or parallel. Here we will discuss the
+angle between two lines in terms of their slopes.
+Let L1 and L2 be two non-vertical lines with slopes m1 and m2, respectively. If α1
+and α2 are the inclinations of lines L1 and L2, respectively. Then
+α
+tan
+and
+α
+tan
+2
+2
+1
+1
+=
+=
+m
+m
+.
+We know that when two lines intersect each other, they make two pairs of
+vertically opposite angles such that sum of any two adjacent angles is 180°. Let θ and
+φ be the adjacent angles between the lines L1 and L2 (Fig 9.6). Then
+θ = α2 – α1 and α1, α2  ≠ 90°.
+Therefore  tan θ = tan (α2 – α1) 
+2
+1
+2
+1
+1
+2
+1
+2
+tan
+tan
+1 tan
+tan
+1
+m
+m
+m m
+α
+α
+α
+α
+−
+−
+=
+=
++
++
+   (as 1 + m1m2 ≠ 0)
+and φ = 180° – θ so that
+tan φ = tan (180° – θ ) = – tan
+
+[Targeted Search for 'Example']

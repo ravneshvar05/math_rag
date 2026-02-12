@@ -1,0 +1,69 @@
+Loading metadata from: data\metadata.json
+
+--- Metadata Stats ---
+{'total_chunks': 189, 'storage_path': 'data\\metadata.json'}
+
+--- Checking for Example Metadata ---
+Total chunks: 189
+Chunks with 'example_number': 16
+
+Sample Example Chunks:
+- ChunkID: 0b152e4a-5108-4a80-8084-d43c42365c6a
+  Example Num: 1
+  Content Preview: Example 1 Find the slope of the lines:
+...
+--------------------
+- ChunkID: 899611a4-6f9d-4b2b-829e-c736d1bdf3e5
+  Example Num: 2
+  Content Preview: Example 2  If the angle between two lines is π
+...
+--------------------
+- ChunkID: f42bdea4-f510-4162-a31a-540657aedd98
+  Example Num: 3
+  Content Preview: Example 3 Line through the points (–2, 6) and (4, ...
+--------------------
+- ChunkID: 6ef37ccc-81de-4aa7-a777-326d765cdad5
+  Example Num: 4
+  Content Preview: Example 4 Find the equations of the lines
+parallel...
+--------------------
+- ChunkID: 84e91af1-3a3b-4baf-812e-8466ab594978
+  Example Num: 5
+  Content Preview: STRAIGHT LINES       161
+
+
+Thus, the point (x, y) ...
+--------------------
+
+--- Simulating Query: 'Example 5' ---
+Extracted Example Number: 5
+Metadata filter found 1 chunks.
+
+--- Full Content of Example 5 Chunk ---
+ChunkID: 84e91af1-3a3b-4baf-812e-8466ab594978
+----------------------------------------
+STRAIGHT LINES       161
+
+
+Thus, the point (x, y) lies on the line with slope m through the fixed point (x0, y0),
+if and only if, its coordinates satisfy the equation
+y – y0 = m (x – x0)
+
+
+Example 5 Find the equation of the line through (– 2, 3) with slope – 4.
+
+
+Solution Here m = – 4 and given point (x0 , y0) is (– 2, 3).
+
+
+By slope-intercept form formula
+(1) above, equation of the given
+line is
+y – 3 = – 4 (x + 2) or
+4x + y + 5 = 0, which is the
+required equation.
+
+----------------------------------------
+
+--- All Extracted Example Numbers ---
+[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0]

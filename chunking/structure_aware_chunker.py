@@ -410,9 +410,11 @@ class StructureAwareChunker:
 
     def _extract_example_info(self, text: str) -> Optional[str]:
         """Extract example number."""
+        # Updated regex to handle potential newlines and various separators
         patterns = [
-            r'Example\s+(\d+(?:\.\d+)?)',
-            r'Ex\.\s*(\d+(?:\.\d+)?)',
+            r'Example\s*[:.-]?\s*(\d+(?:\.\d+)?)', 
+            r'Example\s+[\r\n]+\s*(\d+(?:\.\d+)?)', # Handle header split across lines
+            r'Ex\s*[:.-]?\s*(\d+(?:\.\d+)?)',
         ]
         
         for pattern in patterns:

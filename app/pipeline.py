@@ -135,6 +135,23 @@ class MathRAGPipeline:
         logger.info("Step 7: Storing metadata...")
         self.metadata_store.add_chunks(chunks)
         
+        # Step 8: Build Keyword Index (BM25)
+        logger.info("Step 8: Updating Keyword Index (BM25)...")
+        # We need to initialize the retriever component to access the keyword retriever
+        # OR just instantiate a temporary one if we don't want to load the whole retrieval pipeline
+        from retrieval.keyword_retriever import KeywordRetriever
+        
+        # Merge config
+        retrieval_config = self._retrieval_config.copy()
+        
+        # Initialize and index
+        kw_retriever = KeywordRetriever(retrieval_config)
+        # We need to index ALL chunks, not just the new ones, because BM25 is usually global.
+        # However, for simplicity/MVP, let's just re-index everything in the metadata store + new chunks?
+        # Ideally, we should fetch all chunks from metadata store.
+        all_chunks = self.metadata_store.filter_chunks() # Get everything
+        kw_retriever.index_chunks(all_chunks)
+        
         # Save
         self._save_stores()
         
@@ -292,6 +309,10 @@ class MathRAGPipeline:
                 embedding_generator=self.embedding_generator,
                 config=retrieval_config
             )
+
+        # Build/Update BM25 Index if needed (lazy load is handled in init, but we might want to refresh)
+        # For now, let's assume it loads from disk or is built during indexing.
+
         
         if not self.retrieval_pipeline:
             self.retrieval_pipeline = RetrievalPipeline(
