@@ -28,7 +28,7 @@ class StructureAwareChunker:
         self.math_detector = MathDetector()
         self.equation_cleaner = EquationCleaner()
         
-        logger.info(f"Initialized chunker: {self.min_tokens}-{self.max_tokens} tokens")
+        logger.info(f"Initialized StructureAwareChunker with max_tokens={self.max_tokens}")
     
     def chunk_document(
         self,
@@ -37,7 +37,7 @@ class StructureAwareChunker:
         class_level: str
     ) -> List[ContentChunk]:
         """
-        Chunk entire document into structured chunks.
+        Chunk entire document into structured chunks with cross-page grouping.
         
         Args:
             pages: List of page data
@@ -47,33 +47,150 @@ class StructureAwareChunker:
         Returns:
             List of content chunks
         """
-        logger.info(f"Starting chunking for document: {document_id}")
+        logger.info(f"Starting smart chunking for document: {document_id}")
         
         chunks = []
         current_chapter = {'number': 0, 'name': 'Introduction'}
         current_section = {'name': ''}
         
-        for page in pages:
-            page_chunks = self._chunk_page(
-                page,
+        # State for cross-page exercise/example collection
+        collecting_exercise = False
+        exercise_buffer = {
+            'text': '',
+            'number': '',
+            'start_page': 0,
+            'type': 'exercise'  # or 'example'
+        }
+        
+        for page_idx, page in enumerate(pages):
+            page_num = page.get('page_number', page_idx + 1)
+            page_text = page.get('text', '')
+            blocks = page.get('blocks', [])
+            
+            # Check for exercise/example headers
+            exercise_match = re.search(r'EXERCISE\s+(\d+\.\d+)', page_text, re.IGNORECASE)
+            example_match = re.search(r'Example\s+(\d+)', page_text, re.IGNORECASE)
+            
+            # If we find a new exercise/example header
+            if exercise_match or example_match:
+                # Save previous collection if exists
+                if collecting_exercise and exercise_buffer['text']:
+                    chunk = self._create_collection_chunk(
+                        exercise_buffer,
+                        document_id,
+                        class_level,
+                        current_chapter,
+                        current_section
+                    )
+                    if chunk:
+                        chunks.append(chunk)
+                
+                # Start new collection
+                if exercise_match:
+                    exercise_buffer = {
+                        'text': page_text,
+                        'number': exercise_match.group(1),
+                        'start_page': page_num,
+                        'type': 'exercise'
+                    }
+                    collecting_exercise = True
+                    logger.info(f"Started collecting Exercise {exercise_match.group(1)} from page {page_num}")
+                    
+                elif example_match:
+                    exercise_buffer = {
+                        'text': page_text,
+                        'number': example_match.group(1),
+                        'start_page': page_num,
+                        'type': 'example'
+                    }
+                    collecting_exercise = True
+                    logger.info(f"Started collecting Example {example_match.group(1)} from page {page_num}")
+            
+            elif collecting_exercise:
+                # Continue collecting until we hit another exercise/example or significant break
+                # Check if we've hit a new major section
+                if re.search(r'(MISCELLANEOUS|SUMMARY|CHAPTER)', page_text, re.IGNORECASE):
+                    # Stop collecting and save
+                    chunk = self._create_collection_chunk(
+                        exercise_buffer,
+                        document_id,
+                        class_level,
+                        current_chapter,
+                        current_section
+                    )
+                    if chunk:
+                        chunks.append(chunk)
+                    collecting_exercise = False
+                else:
+                    # Add to buffer
+                    exercise_buffer['text'] += '\n\n' + page_text
+            
+            else:
+                # Regular chunking for non-exercise/example content
+                page_chunks = self._chunk_page(
+                    page,
+                    document_id,
+                    class_level,
+                    current_chapter,
+                    current_section
+                )
+                chunks.extend(page_chunks)
+            
+            # Update chapter and section if found
+            chapter_match = re.search(r'CHAPTER\s+(\d+)', page_text, re.IGNORECASE)
+            if chapter_match:
+                current_chapter = {'number': int(chapter_match.group(1)), 'name': 'Chapter ' + chapter_match.group(1)}
+        
+        # Save any remaining collection
+        if collecting_exercise and exercise_buffer['text']:
+            chunk = self._create_collection_chunk(
+                exercise_buffer,
                 document_id,
                 class_level,
                 current_chapter,
                 current_section
             )
-            chunks.extend(page_chunks)
-            
-            # Update chapter and section if found in page
-            chapter = page.get('chapter')
-            if chapter:
-                current_chapter = chapter
-            
-            section = page.get('section')
-            if section:
-                current_section = section
+            if chunk:
+                chunks.append(chunk)
         
-        logger.info(f"Created {len(chunks)} chunks from document")
+        logger.info(f"Created {len(chunks)} chunks from document (with smart grouping)")
         return chunks
+    
+    def _create_collection_chunk(
+        self,
+        buffer: Dict[str, Any],
+        document_id: str,
+        class_level: str,
+        chapter: Dict[str, Any],
+        section: Dict[str, Any]
+    ) -> Optional[ContentChunk]:
+        """Create a chunk from collected exercise/example content."""
+        if not buffer['text'].strip():
+            return None
+        
+        chunk_type = ContentType.EXERCISE if buffer['type'] == 'exercise' else ContentType.EXAMPLE
+        
+        # Extract equations from text
+        equations = self.math_detector.extract_equations(buffer['text'])
+        
+        chunk = ContentChunk(
+            chunk_id=str(uuid.uuid4()),
+            document_id=document_id,
+            class_level=class_level,
+            chapter_number=chapter.get('number', 0),
+            chapter_name=chapter.get('name', ''),
+            section_name=section.get('name', ''),
+            content_type=chunk_type,
+            text_content=buffer['text'],
+            page_number=buffer['start_page'],
+            latex_equations=equations,
+            images=[],
+            tables=[],
+            example_number=buffer['number'] if buffer['type'] == 'example' else None,
+            exercise_number=buffer['number'] if buffer['type'] == 'exercise' else None
+        )
+        
+        return chunk
     
     def _chunk_page(
         self,
@@ -83,381 +200,101 @@ class StructureAwareChunker:
         chapter: Dict[str, Any],
         section: Dict[str, Any]
     ) -> List[ContentChunk]:
-        """Chunk a single page."""
+        """Chunk a single page (fallback for regular content)."""
         chunks = []
         page_num = page.get('page_number', 0)
-        text_blocks = page.get('blocks', [])
-        images = page.get('images', [])
-        tables = page.get('tables', [])
+        text = page.get('text', '')
         
-        # Group related blocks
-        grouped_blocks = self._group_related_blocks(text_blocks)
+        # Simple chunking for non-exercise content
+        # Split into paragraphs
+        paragraphs = text.split('\n\n')
         
-        for block_group in grouped_blocks:
-            chunk = self._create_chunk_from_blocks(
-                block_group,
+        current_text = ""
+        for para in paragraphs:
+            if not para.strip():
+                continue
+            
+            # Estimate token count (rough: word count * 1.3)
+            current_tokens = len(current_text.split()) * 1.3
+            para_tokens = len(para.split()) * 1.3
+            
+            if current_tokens + para_tokens > self.max_tokens and current_text:
+                # Create chunk
+                chunk = self._create_simple_chunk(
+                    current_text,
+                    document_id,
+                    class_level,
+                    chapter,
+                    section,
+                    page_num
+                )
+                if chunk:
+                    chunks.append(chunk)
+                current_text = para
+            else:
+                current_text += '\n\n' + para if current_text else para
+        
+        # Create final chunk
+        if current_text.strip():
+            chunk = self._create_simple_chunk(
+                current_text,
                 document_id,
                 class_level,
                 chapter,
                 section,
-                page_num,
-                images,
-                tables
+                page_num
             )
-            
             if chunk:
                 chunks.append(chunk)
         
-        # Handle standalone tables
-        for table in tables:
-            table_chunk = self._create_table_chunk(
-                table,
-                document_id,
-                class_level,
-                chapter,
-                section
-            )
-            chunks.append(table_chunk)
-        
-        # Handle standalone images (diagrams without nearby text)
-        for image in images:
-            if not self._is_image_in_chunks(image, chunks):
-                image_chunk = self._create_image_chunk(
-                    image,
-                    document_id,
-                    class_level,
-                    chapter,
-                    section
-                )
-                chunks.append(image_chunk)
-        
         return chunks
     
-    def _group_related_blocks(self, blocks: List[Dict[str, Any]]) -> List[List[Dict[str, Any]]]:
-        """Group related text blocks together."""
-        if not blocks:
-            return []
-        
-        groups = []
-        current_group = [blocks[0]]
-        
-        for i in range(1, len(blocks)):
-            current_block = blocks[i]
-            prev_block = blocks[i-1]
-            
-            # Check if blocks should be grouped
-            if self._should_group_blocks(prev_block, current_block):
-                current_group.append(current_block)
-            else:
-                groups.append(current_group)
-                current_group = [current_block]
-        
-        if current_group:
-            groups.append(current_group)
-        
-        return groups
-    
-    def _should_group_blocks(self, block1: Dict[str, Any], block2: Dict[str, Any]) -> bool:
-        """Determine if two blocks should be grouped."""
-        text1 = block1.get('text', '')
-        text2 = block2.get('text', '')
-        
-        # 1. HARD SPLIT: If current block is Exercise Header, it starts NEW chunk.
-        # (This separates it from previous text, forcing a break even if inside a proof)
-        is_header_2 = self._is_exercise_header(text2)
-        if is_header_2:
-            return False
-            
-        # 2. HARD KEEP (GLUE): If previous block is Exercise Header, it GLUES to next.
-        if self._is_exercise_header(text1):
-            return True
-
-        # 3. HARD KEEP: Table-like rows should try to stay together
-        if self._is_table_row(text1) and self._is_table_row(text2):
-            return True
-        
-        # Don't split proofs
-        if self.math_detector.is_proof(text1) or self.math_detector.is_proof(text2):
-            return True
-        
-        # Don't split derivations
-        if self.math_detector.is_derivation(text1) and self.math_detector.is_derivation(text2):
-            return True
-        
-        # Check token count
-        combined_tokens = self._estimate_tokens(text1 + text2)
-        if combined_tokens > self.max_tokens:
-            return False
-        
-        # Group if second block continues thought (starts with lowercase or connector)
-        if text2 and text2[0].islower():
-            return True
-        
-        connectors = ['therefore', 'thus', 'hence', 'so', 'then', 'also', 'similarly']
-        if any(text2.lower().startswith(conn) for conn in connectors):
-            return True
-        
-        return False
-
-    def _is_exercise_header(self, text: str) -> bool:
-        """Check if text is an Exercise header."""
-        # Standard: "EXERCISE 3.1"
-        if re.search(r'^\s*EXERCISE\s+\d+(\.\d+)?', text, re.IGNORECASE):
-            return True
-            
-        # Miscellaneous: "Miscellaneous Exercise on Chapter 3"
-        if re.search(r'^\s*Miscellaneous\s+Exercise', text, re.IGNORECASE):
-            return True
-            
-        return False
-
-    def _is_table_row(self, text: str) -> bool:
-        """Check if text looks like a row in a math table."""
-        # Heuristic: Multiple numbers separated by spaces/tabs, or very short text
-        # e.g. "30° 45° 60°" or "0 1/2 1/√2"
-        if len(text) < 50:
-            # Count numbers
-            numbers = len(re.findall(r'\d+', text))
-            if numbers >= 2:
-                return True
-        return False
-
-    def _extract_example_info(self, text: str) -> Optional[str]:
-        """Extract example number."""
-        # Updated regex to handle potential newlines and various separators
-        patterns = [
-            r'Example\s*[:.-]?\s*(\d+(?:\.\d+)?)', 
-            r'Example\s+[\r\n]+\s*(\d+(?:\.\d+)?)', # Handle header split across lines
-            r'Ex\s*[:.-]?\s*(\d+(?:\.\d+)?)',
-            r'Example\s+(\d+)', # Simple "Example 4" followed by text
-        ]
-        
-        for pattern in patterns:
-            match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                return match.group(1)
-        return None
-    
-    def _create_chunk_from_blocks(
+    def _create_simple_chunk(
         self,
-        blocks: List[Dict[str, Any]],
+        text: str,
         document_id: str,
         class_level: str,
         chapter: Dict[str, Any],
         section: Dict[str, Any],
-        page_num: int,
-        page_images: List[ImageData],
-        page_tables: List[TableData]
+        page_num: int
     ) -> Optional[ContentChunk]:
-        """Create a content chunk from text blocks."""
-        # Combine block texts
-        text_content = "\n\n".join(block['text'] for block in blocks)
-        
-        if len(text_content.strip()) < 20:
+        """Create a simple text chunk."""
+        if not text.strip():
             return None
         
-        # Generate chunk ID
-        chunk_id = str(uuid.uuid4())
-        
         # Detect content type
-        content_type_str = self.math_detector.detect_content_type(text_content)
-        content_type = self._string_to_content_type(content_type_str)
+        content_type_str = self.math_detector.detect_content_type(text)
+        content_type = self._map_content_type(content_type_str)
         
         # Extract equations
-        equations = self.math_detector.extract_equations(text_content)
+        equations = self.math_detector.extract_equations(text)
         
-        # Find related images (within proximity)
-        related_images = self._find_related_images(blocks, page_images)
-        
-        # Find related tables
-        related_tables = self._find_related_tables(blocks, page_tables)
-        
-        # Extract example number
-        example_number = self._extract_example_info(text_content)
-        
-        # Create chunk
         chunk = ContentChunk(
-            chunk_id=chunk_id,
+            chunk_id=str(uuid.uuid4()),
             document_id=document_id,
             class_level=class_level,
             chapter_number=chapter.get('number', 0),
             chapter_name=chapter.get('name', ''),
             section_name=section.get('name', ''),
             content_type=content_type,
+            text_content=text,
             page_number=page_num,
-            text_content=text_content,
             latex_equations=equations,
-            has_equation=len(equations) > 0,
-            equation_count=len(equations),
-            images=related_images,
-            has_image=len(related_images) > 0,
-            image_count=len(related_images),
-            tables=related_tables,
-            has_table=len(related_tables) > 0,
-            table_count=len(related_tables),
-            contains_proof=self.math_detector.is_proof(text_content),
-            contains_derivation=self.math_detector.is_derivation(text_content),
-            is_definition='definition' in content_type_str,
-            is_theorem='theorem' in content_type_str,
-            is_example='example' in content_type_str,
-            example_number=example_number,
-            token_count=self._estimate_tokens(text_content),
-            char_count=len(text_content),
-            complexity_score=self.math_detector.calculate_math_density(text_content)
+            images=[],
+            tables=[]
         )
         
         return chunk
     
-    def _create_table_chunk(
-        self,
-        table: TableData,
-        document_id: str,
-        class_level: str,
-        chapter: Dict[str, Any],
-        section: Dict[str, Any]
-    ) -> ContentChunk:
-        """Create chunk for standalone table."""
-        chunk_id = str(uuid.uuid4())
-        
-        chunk = ContentChunk(
-            chunk_id=chunk_id,
-            document_id=document_id,
-            class_level=class_level,
-            chapter_number=chapter.get('number', 0),
-            chapter_name=chapter.get('name', ''),
-            section_name=section.get('name', ''),
-            content_type=ContentType.TABLE,
-            page_number=table.page_number,
-            text_content=f"Table: {table.markdown_content}",
-            tables=[table],
-            has_table=True,
-            table_count=1,
-            token_count=self._estimate_tokens(table.markdown_content),
-            char_count=len(table.markdown_content)
-        )
-        
-        return chunk
-    
-    def _create_image_chunk(
-        self,
-        image: ImageData,
-        document_id: str,
-        class_level: str,
-        chapter: Dict[str, Any],
-        section: Dict[str, Any]
-    ) -> ContentChunk:
-        """Create chunk for standalone image."""
-        chunk_id = str(uuid.uuid4())
-        
-        text_content = f"Image: {image.description}"
-        if image.ocr_text:
-            text_content += f"\n\nExtracted text: {image.ocr_text}"
-        
-        chunk = ContentChunk(
-            chunk_id=chunk_id,
-            document_id=document_id,
-            class_level=class_level,
-            chapter_number=chapter.get('number', 0),
-            chapter_name=chapter.get('name', ''),
-            section_name=section.get('name', ''),
-            content_type=ContentType.IMAGE,
-            page_number=image.page_number,
-            text_content=text_content,
-            images=[image],
-            has_image=True,
-            image_count=1,
-            token_count=self._estimate_tokens(text_content),
-            char_count=len(text_content)
-        )
-        
-        return chunk
-    
-    def _find_related_images(
-        self,
-        blocks: List[Dict[str, Any]],
-        images: List[ImageData]
-    ) -> List[ImageData]:
-        """Find images related to text blocks based on position."""
-        if not blocks or not images:
-            return []
-        
-        related = []
-        
-        # Get bounding box of text blocks
-        block_bboxes = [b.get('bbox') for b in blocks if b.get('bbox')]
-        if not block_bboxes:
-            return []
-        
-        # Simple proximity check
-        for image in images:
-            if image.bbox:
-                # Check if image is near any block
-                for block_bbox in block_bboxes:
-                    if self._is_nearby(image.bbox, block_bbox, threshold=100):
-                        related.append(image)
-                        break
-        
-        return related
-    
-    def _find_related_tables(
-        self,
-        blocks: List[Dict[str, Any]],
-        tables: List[TableData]
-    ) -> List[TableData]:
-        """Find tables related to text blocks."""
-        # Similar to images
-        if not blocks or not tables:
-            return []
-        
-        related = []
-        block_bboxes = [b.get('bbox') for b in blocks if b.get('bbox')]
-        
-        for table in tables:
-            if table.bbox:
-                for block_bbox in block_bboxes:
-                    if self._is_nearby(table.bbox, block_bbox, threshold=150):
-                        related.append(table)
-                        break
-        
-        return related
-    
-    def _is_nearby(self, bbox1: List[float], bbox2: List[float], threshold: float) -> bool:
-        """Check if two bounding boxes are nearby."""
-        # Calculate distance between centers
-        center1 = ((bbox1[0] + bbox1[2]) / 2, (bbox1[1] + bbox1[3]) / 2)
-        center2 = ((bbox2[0] + bbox2[2]) / 2, (bbox2[1] + bbox2[3]) / 2)
-        
-        distance = ((center1[0] - center2[0])**2 + (center1[1] - center2[1])**2)**0.5
-        
-        return distance < threshold
-    
-    def _is_image_in_chunks(self, image: ImageData, chunks: List[ContentChunk]) -> bool:
-        """Check if image is already included in chunks."""
-        for chunk in chunks:
-            for chunk_image in chunk.images:
-                if chunk_image.image_id == image.image_id:
-                    return True
-        return False
-    
-    def _estimate_tokens(self, text: str) -> int:
-        """Estimate token count (rough approximation)."""
-        # Simple estimation: ~4 characters per token
-        return len(text) // 4
-    
-    def _string_to_content_type(self, type_str: str) -> ContentType:
-        """Convert string to ContentType enum."""
-        type_map = {
+    def _map_content_type(self, type_str: str) -> ContentType:
+        """Map string content type to ContentType enum."""
+        mapping = {
             'definition': ContentType.DEFINITION,
             'theorem': ContentType.THEOREM,
             'proof': ContentType.PROOF,
-            'derivation': ContentType.DERIVATION,
             'example': ContentType.EXAMPLE,
             'exercise': ContentType.EXERCISE,
             'solution': ContentType.SOLUTION,
-            'table': ContentType.TABLE,
-            'image': ContentType.IMAGE,
-            'formula': ContentType.FORMULA,
+            'derivation': ContentType.DERIVATION,
         }
-        
-        return type_map.get(type_str, ContentType.TEXT)
-
+        return mapping.get(type_str, ContentType.TEXT)

@@ -74,3 +74,36 @@ temp/
 
 # OS
 Thumbs.db
+
+# Project Specific Ignored Files (Benchmarks, Debug Scripts, Temp Outputs)
+# Benchmarks
+benchmark_results.txt
+colab_benchmark_results.txt
+colab_benchmark_report.md
+unstructured_pyt.py
+
+# Debug & Inspection Scripts
+inspect_blocks.py
+debug_formatting.py
+debug_retrieval.py
+debug_unstructured.py
+debug_unstructured_hybrid.py
+check_exercise.py
+check_index.py
+verify_all_imports.py
+verify_cuda.py
+scan_patterns.py
+evaluate_chunking.py
+validate_system.py
+analyze_pdf.py
+
+# Ad-hoc Tests
+test.py
+test_full_pipeline.py
+
+# Temporary Outputs
+debug_output.txt
+debug_retrieval_output.txt
+debug_retrieval_output_full.txt
+pdf_analysis.txt
+example.txt

@@ -1,9 +1,10 @@
 system:
   chunk_size: 1000
   chunk_overlap: 200
-  embedding_model: "all-MiniLM-L6-v2"
+  embedding_model: "BAAI/bge-large-en-v1.5"
   llm_model: "llama-3.3-70b-versatile"
   similarity_threshold: 0.5
+  device: "cpu"
 
 paths:
   raw_data: "data/raw"
