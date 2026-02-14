@@ -2,7 +2,15 @@
 import streamlit as st
 import os
 import time
+import sys
 from pathlib import Path
+import asyncio
+
+# Add project root to path
+project_root = str(Path(__file__).parent.parent.absolute())
+if project_root not in sys.path:
+    sys.path.append(project_root)
+
 from app.pipeline import MathRAGPipeline
 from config import get_config
 

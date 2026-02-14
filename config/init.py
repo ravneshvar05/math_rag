@@ -86,8 +86,8 @@ class ConfigLoader:
             
             # Models
             groq_model=os.getenv('GROQ_MODEL', self.yaml_config.get('system', {}).get('llm_model', 'llama-3.3-70b-versatile')),
-            embedding_model=os.getenv('EMBEDDING_MODEL', 'BAAI/bge-large-en-v1.5'),
-            embedding_dimension=int(os.getenv('EMBEDDING_DIMENSION', '1024')),
+            embedding_model=os.getenv('EMBEDDING_MODEL', self.yaml_config.get('system', {}).get('embedding_model', 'Alibaba-NLP/gte-base-en-v1.5')),
+            embedding_dimension=int(os.getenv('EMBEDDING_DIMENSION', self.yaml_config.get('system', {}).get('embedding_dimension', 768))),
             
             # Paths
             data_dir=data_dir,

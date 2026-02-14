@@ -13,7 +13,7 @@ logger = get_logger(__name__)
 class EmbeddingGenerator:
     """Generate embeddings for content chunks."""
     
-    def __init__(self, model_name: str = "BAAI/bge-large-en-v1.5", device: str = "cpu"):
+    def __init__(self, model_name: str = "Alibaba-NLP/gte-base-en-v1.5", device: str = "cpu"):
         """
         Initialize embedding generator.
         
@@ -25,7 +25,7 @@ class EmbeddingGenerator:
         self.device = device
         
         logger.info(f"Loading embedding model: {model_name}")
-        self.model = SentenceTransformer(model_name, device=device)
+        self.model = SentenceTransformer(model_name, device=device, trust_remote_code=True)
         self.dimension = self.model.get_sentence_embedding_dimension()
         
         logger.info(f"Model loaded. Embedding dimension: {self.dimension}")
