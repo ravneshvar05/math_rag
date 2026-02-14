@@ -5,6 +5,7 @@ import time
 import sys
 from pathlib import Path
 import asyncio
+import base64
 
 # Add project root to path
 project_root = str(Path(__file__).parent.parent.absolute())
@@ -119,6 +120,33 @@ st.markdown("""
         border-top: 1px solid #eee;
         padding-top: 0.3rem;
     }
+    .rag-image-container {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        margin: 0.5rem 0;
+        padding: 5px;
+        background-color: #fafafa;
+        border-radius: 8px;
+        width: 100%;
+    }
+    .rag-image-container img {
+        max-height: 250px !important;  /* Strict height cap */
+        max-width: 85% !important;     /* prevent full width */
+        width: auto !important;
+        height: auto !important;
+        object-fit: contain;
+        border: 1px solid #e0e0e0;
+        border-radius: 6px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    }
+    .rag-caption {
+        font-size: 0.8rem;
+        color: #666;
+        text-align: center;
+        margin-top: 4px;
+        font-style: italic;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -132,6 +160,55 @@ if 'pipeline' not in st.session_state:
 
 if 'messages' not in st.session_state:
     st.session_state.messages = []
+
+def get_image_base64(image_path):
+    """Read image file and return base64 string."""
+    try:
+        with open(image_path, "rb") as img_file:
+            return base64.b64encode(img_file.read()).decode()
+    except Exception as e:
+        return None
+
+def render_visuals(sources):
+    """Helper to render unique visuals from sources using HTML/CSS."""
+    if not sources:
+        return
+        
+    unique_images = set()
+    unique_tables = set()
+    
+    # Header for visuals if any
+    has_visuals = any(src.get('images') or src.get('tables') for src in sources)
+    
+    if has_visuals:
+        for src in sources:
+            # Show images
+            if src.get('images'):
+                for img_path in src['images']:
+                    if img_path not in unique_images and os.path.exists(img_path):
+                        unique_images.add(img_path)
+                        
+                        # Convert to Base64 for strict HTML control
+                        b64_str = get_image_base64(img_path)
+                        if b64_str:
+                            html = f'''
+                                <div class="rag-image-container">
+                                    <img src="data:image/png;base64,{b64_str}" alt="Textbook Diagram">
+                                </div>
+                            '''
+                            st.markdown(html, unsafe_allow_html=True)
+            
+            # Show tables
+            if src.get('tables'):
+                for tbl_path in src['tables']:
+                    if tbl_path not in unique_tables:
+                        unique_tables.add(tbl_path)
+                        # For tables, we usually have markdown_content in the chunk 
+                        # but often sources just have the path. 
+                        # If table rendering is needed:
+                        # st.markdown(src.get('table_content', ''))
+                        pass
+
 
 # Sidebar - Document Management
 with st.sidebar:
@@ -193,15 +270,19 @@ st.markdown("<h1 class='main-header'>🤖 MathRAG Assistant</h1>", unsafe_allow_
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
+        
+        # Display images directly in chat
+        if message["role"] == "assistant" and "sources" in message:
+            render_visuals(message["sources"])
+
         if "sources" in message:
             with st.expander("View Sources"):
                 for src in message["sources"]:
                     st.markdown(f"**{src['chapter']} - {src['section']}** (Score: {src['score']:.2f})")
                     st.caption(src['text_preview'])
-                    if src.get('images'):
-                        for img in src['images']:
-                            if os.path.exists(img):
-                                st.image(img)
+                    # We still keep images in sources expander but maybe just captions?
+                    # Or just keep it as is.
+
         
         # Display model and usage if assistant
         if message["role"] == "assistant" and "model" in message and "usage" in message:
@@ -238,16 +319,15 @@ if prompt := st.chat_input("Ask a question about your math textbooks..."):
                 message_placeholder.markdown(answer)
                 full_response = answer
                 
+                # Show visuals directly
+                render_visuals(sources)
+                
                 # Show sources
                 if sources:
                     with st.expander("View Sources"):
                         for src in sources:
                             st.markdown(f"**{src['chapter']} - {src['section']}** (Score: {src['score']:.2f})")
                             st.caption(src['text_preview'])
-                            if src.get('images'):
-                                for img in src['images']:
-                                    if os.path.exists(img):
-                                        st.image(img)
             
             st.session_state.messages.append({
                 "role": "assistant",

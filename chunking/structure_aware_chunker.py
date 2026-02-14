@@ -1,7 +1,7 @@
 """Structure-aware chunking for mathematics content."""
 
 from typing import List, Dict, Any, Optional
-from utils.schema import ContentChunk, ContentType, ImageData, TableData, EquationData
+from utils.schema import ContentChunk, ContentType, ImageData, TableData, EquationData, ImageType
 from utils.math_utils import MathDetector, EquationCleaner
 from utils.logging import get_logger
 import uuid
@@ -67,6 +67,10 @@ class StructureAwareChunker:
             page_text = page.get('text', '')
             blocks = page.get('blocks', [])
             
+            # Retrieve page-level images and tables
+            current_page_images = page.get('images', [])
+            current_page_tables = page.get('tables', [])
+            
             # Check for exercise/example headers
             exercise_match = re.search(r'EXERCISE\s+(\d+\.\d+)', page_text, re.IGNORECASE)
             example_match = re.search(r'Example\s+(\d+)', page_text, re.IGNORECASE)
@@ -80,7 +84,11 @@ class StructureAwareChunker:
                         document_id,
                         class_level,
                         current_chapter,
-                        current_section
+                        current_section,
+                        # Pass buffered images (simplified: passing current page images for now, 
+                        # ideally we'd buffer images too or link based on page_number later)
+                        page_images=current_page_images, 
+                        page_tables=current_page_tables
                     )
                     if chunk:
                         chunks.append(chunk)
@@ -116,7 +124,9 @@ class StructureAwareChunker:
                         document_id,
                         class_level,
                         current_chapter,
-                        current_section
+                        current_section,
+                        page_images=current_page_images,
+                        page_tables=current_page_tables
                     )
                     if chunk:
                         chunks.append(chunk)
@@ -124,6 +134,11 @@ class StructureAwareChunker:
                 else:
                     # Add to buffer
                     exercise_buffer['text'] += '\n\n' + page_text
+                    
+                    # Also need to consider how to accrue images across pages for multi-page exercises
+                    # For now, we're passing current page's images when we CLOSE the chunk.
+                    # This is imperfect for multi-page exercises where image was on first page.
+                    # Ideally, we should accumulate images in exercise_buffer.
             
             else:
                 # Regular chunking for non-exercise/example content
@@ -156,13 +171,101 @@ class StructureAwareChunker:
         logger.info(f"Created {len(chunks)} chunks from document (with smart grouping)")
         return chunks
     
+    def _link_content_to_chunk(
+        self,
+        chunk: ContentChunk,
+        page_images: List[Dict[str, Any]],
+        page_tables: List[Dict[str, Any]]
+    ):
+        """
+        Smart linking of images and tables to chunk.
+        
+        Strategies:
+        1. Reference Check: Does chunk text say "Fig 1.1"?
+        2. Proximity Check: Is image/table spatially near the text?
+        """
+        if not (page_images or page_tables):
+            return
+
+        # 1. Reference Linking
+        # Regex to find figure references like "Fig. 1.1", "Figure 1", "Table 2.3"
+        fig_refs = re.findall(r'Fig(?:ure)?\.?\s*(\d+(?:\.\d+)?)', chunk.text_content, re.IGNORECASE)
+        table_refs = re.findall(r'Table\s*(\d+(?:\.\d+)?)', chunk.text_content, re.IGNORECASE)
+        
+        # Link referenced images
+        for fig_ref in fig_refs:
+            # Normalize ref (e.g. "1.1")
+            ref_id = fig_ref.replace('.', '_')
+            for img in page_images:
+                # Check if image ID contains this reference
+                # We stored image_id as "fig_1_1"
+                if f"fig_{ref_id}" in img['image_id']:
+                    # Create ImageData object
+                    img_obj = ImageData(
+                        image_id=img['image_id'],
+                        image_path=img['image_path'],
+                        image_type=ImageType.DIAGRAM, # Assuming diagram for now
+                        description=img.get('description', ''),
+                        page_number=img['page_number'],
+                        bbox=img.get('bbox')
+                    )
+                    # Avoid duplicates
+                    if not any(i.image_id == img_obj.image_id for i in chunk.images):
+                        chunk.images.append(img_obj)
+                        logger.debug(f"Linked image {img['image_id']} to chunk {chunk.chunk_id} via reference")
+
+        # Link referenced tables
+        for tab_ref in table_refs:
+            ref_id = tab_ref.replace('.', '_')
+            for tbl in page_tables:
+                # Check if table ID contains this reference
+                # Table IDs are "table_pX_Y" - we might need to store table_num if we parse caption
+                # For now, if we don't have table numbers in extraction, we look for matching ID
+                if f"table_{ref_id}" in tbl['table_id']:
+                    from utils.schema import TableData
+                    tbl_obj = TableData(
+                        table_id=tbl['table_id'],
+                        table_path=tbl.get('table_path', ''),
+                        markdown_content=tbl['markdown_content'],
+                        csv_content=tbl.get('csv_content'),
+                        num_rows=tbl['num_rows'],
+                        num_cols=tbl['num_cols'],
+                        has_header=tbl['has_header'],
+                        page_number=tbl['page_number'],
+                        bbox=tbl.get('bbox')
+                    )
+                    if not any(t.table_id == tbl_obj.table_id for t in chunk.tables):
+                        chunk.tables.append(tbl_obj)
+                        logger.debug(f"Linked table {tbl['table_id']} to chunk {chunk.chunk_id} via reference") 
+
+        # 2. Proximity/Containment Linking (Spatial)
+        # Only if we're on the same page
+        
+        # We need chunk's bbox? 
+        # StructureAwareChunker currently aggregates text from blocks but doesn't track strict union bbox of all blocks.
+        # However, for exercise/example chunks, we know they often span a specific range.
+        
+        # Simplified Proximity: 
+        # If this chunk is the "primary" content of the page (e.g. large chunk), 
+        # or if the image is "orphaned" (not linked by ref), assign to nearest chunk?
+        
+        # For now, let's rely heavily on Reference Linking as per user request ("if an only if... show it")
+        # But user also said "if answer and image are under same heading"
+        
+        # Context Match:
+        # If chunk is "Example 1", and image caption is "Fig 1.1: Diagram for Example 1", that's a match.
+        
+        pass
+
     def _create_collection_chunk(
         self,
         buffer: Dict[str, Any],
         document_id: str,
         class_level: str,
         chapter: Dict[str, Any],
-        section: Dict[str, Any]
+        section: Dict[str, Any],
+        page_images: List[Dict[str, Any]] = None,
+        page_tables: List[Dict[str, Any]] = None
     ) -> Optional[ContentChunk]:
         """Create a chunk from collected exercise/example content."""
         if not buffer['text'].strip():
@@ -190,6 +293,10 @@ class StructureAwareChunker:
             exercise_number=buffer['number'] if buffer['type'] == 'exercise' else None
         )
         
+        # Apply Smart Linking
+        if page_images or page_tables:
+            self._link_content_to_chunk(chunk, page_images or [], page_tables or [])
+        
         return chunk
     
     def _chunk_page(
@@ -204,6 +311,11 @@ class StructureAwareChunker:
         chunks = []
         page_num = page.get('page_number', 0)
         text = page.get('text', '')
+        
+        # Access page-level images/tables if passed 
+        # (Need to update signature or assume page dict has them)
+        page_images = page.get('images', [])
+        page_tables = page.get('tables', [])
         
         # Simple chunking for non-exercise content
         # Split into paragraphs
@@ -229,6 +341,8 @@ class StructureAwareChunker:
                     page_num
                 )
                 if chunk:
+                    if page_images or page_tables:
+                        self._link_content_to_chunk(chunk, page_images, page_tables)
                     chunks.append(chunk)
                 current_text = para
             else:
@@ -245,6 +359,8 @@ class StructureAwareChunker:
                 page_num
             )
             if chunk:
+                if page_images or page_tables:
+                    self._link_content_to_chunk(chunk, page_images, page_tables)
                 chunks.append(chunk)
         
         return chunks

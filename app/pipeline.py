@@ -86,9 +86,10 @@ class MathRAGPipeline:
         extractor = PDFExtractor(str(pdf_path), str(self.config.processed_dir))
         extraction_result = extractor.extract_all()
         
-        # Step 2: Process images with OCR
-        logger.info("Step 2: Processing images...")
+        # Step 2: Process images and tables
+        logger.info("Step 2: Processing visual content...")
         self._process_images(extraction_result['images'])
+        self._process_tables(extraction_result['tables'])
         
         # Step 3: Parse content structure
         logger.info("Step 3: Parsing document structure...")
@@ -208,8 +209,19 @@ class MathRAGPipeline:
                 'confidence': 0.0
             }
         
-        # Format for LLM
+        # Smart Filter: Only keep images from HIGH relevance chunks
+        # This prevents images from "semi-relevant" chunks (rank 4-5) from polluting context/UI
+        best_score = results[0].score
+        score_threshold = best_score * 0.9  # strict 90% threshold relative to best match
+        
+        # Filter for LLM Context
         context_chunks = self.retrieval_pipeline.format_results_for_llm(results)
+        for i, chunk_ctx in enumerate(context_chunks):
+            # If score is too low compared to best, remove image descriptions
+            # We map index i back to results[i] since list order is preserved
+            if results[i].score < score_threshold:
+                if 'images' in chunk_ctx:
+                    del chunk_ctx['images']
         
         # Generate answer
         logger.info("Generating answer...")
@@ -220,24 +232,31 @@ class MathRAGPipeline:
         answer = self._post_process_answer(answer)
         
         # Prepare response
+        source_list = []
+        for r in results:
+            src_data = {
+                'chunk_id': r.chunk.chunk_id,
+                'chapter': f"Chapter {r.chunk.chapter_number}: {r.chunk.chapter_name}",
+                'section': r.chunk.section_name,
+                'content_type': r.chunk.content_type.value,
+                'page': r.chunk.page_number,
+                'score': r.score,
+                'text_preview': r.chunk.text_content[:200] + "...",
+                'images': [], # Default empty
+                'tables': [tbl.table_path for tbl in r.chunk.tables]
+            }
+            
+            # Only include images in UI if score is high enough
+            if r.score >= score_threshold:
+                src_data['images'] = [img.image_path for img in r.chunk.images]
+            
+            source_list.append(src_data)
+
         response = {
             'answer': answer,
             'model': llm_response.get('model'),
             'usage': llm_response.get('usage'),
-            'sources': [
-                {
-                    'chunk_id': r.chunk.chunk_id,
-                    'chapter': f"Chapter {r.chunk.chapter_number}: {r.chunk.chapter_name}",
-                    'section': r.chunk.section_name,
-                    'content_type': r.chunk.content_type.value,
-                    'page': r.chunk.page_number,
-                    'score': r.score,
-                    'text_preview': r.chunk.text_content[:200] + "...",
-                    'images': [img.image_path for img in r.chunk.images],
-                    'tables': [tbl.table_path for tbl in r.chunk.tables]
-                }
-                for r in results
-            ],
+            'sources': source_list,
             'confidence': results[0].score if results else 0.0
         }
         
@@ -323,18 +342,29 @@ class MathRAGPipeline:
                 classifier=QueryClassifier()
             )
     
-    def _process_images(self, images: List):
+    def _process_images(self, images: List[Dict[str, Any]]):
         """Process images with OCR and description."""
         for image in images:
+            img_path = image.get('image_path')
+            if not img_path:
+                continue
+                
             # Check if contains text
-            if self.ocr_processor.contains_text(image.image_path):
-                image.contains_text = True
-                image.ocr_text = self.ocr_processor.extract_text(image.image_path)
+            if self.ocr_processor.contains_text(img_path):
+                image['contains_text'] = True
+                image['ocr_text'] = self.ocr_processor.extract_text(img_path)
+            
             # Generate description
-            image.description = self.image_describer.generate_description(
-                image.image_path,
-                image.image_type.value
+            img_type = image.get('image_type', 'diagram')
+            image['description'] = self.image_describer.generate_description(
+                img_path,
+                img_type
             )
+            
+    def _process_tables(self, tables: List[Dict[str, Any]]):
+        """Placeholder for table processing (e.g. OCR if math heavy)."""
+        # Tables extracted via find_tables already have markdown_content
+        pass
 
     def _post_process_answer(self, text: str) -> str:
         """

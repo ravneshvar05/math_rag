@@ -96,6 +96,7 @@ scan_patterns.py
 evaluate_chunking.py
 validate_system.py
 analyze_pdf.py
+demo.py
 
 # Ad-hoc Tests
 test.py

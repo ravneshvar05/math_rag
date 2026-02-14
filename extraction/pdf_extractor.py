@@ -39,8 +39,24 @@ class PDFExtractor:
         }
         
         for page_num, page in enumerate(doc):
+            # Detect layout
+            split_x = self._detect_columns(page)
+            
+            # Extract text (hybrid)
             page_data = self._extract_page_hybrid(page, page_num + 1)
             result['pages'].append(page_data)
+            
+            # Extract diagrams
+            page_images = self._extract_images_and_diagrams(page, page_num + 1, split_x)
+            result['images'].extend(page_images)
+            
+            # Extract tables
+            page_tables = self._extract_tables(page, page_num + 1)
+            result['tables'].extend(page_tables)
+            
+            # Attach images/tables to page data for easier chunking access
+            page_data['images'] = page_images
+            page_data['tables'] = page_tables
             
         return result
     
@@ -200,6 +216,176 @@ class PDFExtractor:
             return ""
 
 
+    def _detect_columns(self, page) -> float:
+        """
+        Detect if page is two-column and return split point.
+        Returns 0 if single column, or x-coordinate of split if two-column.
+        """
+        # Get all text blocks
+        blocks = page.get_text("blocks")
+        if not blocks:
+            return 0
+            
+        # Analyze horizontal distribution of blocks
+        # If we see a distinct gap in the middle, it's likely two-column
+        page_width = page.rect.width
+        mid_point = page_width / 2
+        
+        # Check central gutter (10% of width around center)
+        gutter_start = mid_point - (page_width * 0.05)
+        gutter_end = mid_point + (page_width * 0.05)
+        
+        blocks_in_gutter = [
+            b for b in blocks 
+            if b[0] < gutter_end and b[2] > gutter_start
+        ]
+        
+        # If few blocks cross the center, it's likely two columns
+        # (Allow for some headers/footers to cross)
+        if len(blocks_in_gutter) < len(blocks) * 0.2:
+            return mid_point
+            
+        return 0
+
+    def _get_diagram_bbox(self, page, caption_block, split_x: float):
+        """Finds diagrams strictly within the same column as the caption."""
+        import fitz
+        caption_rect = fitz.Rect(caption_block[:4])
+        
+        # Determine column context
+        is_left_col = True
+        if split_x > 0:
+            is_left_col = caption_rect.x0 < split_x
+        
+        # Define Column Boundaries to prevent bleed-over
+        col_min_x = 0
+        col_max_x = page.rect.width
+        
+        if split_x > 0:
+            col_min_x = 0 if is_left_col else split_x
+            col_max_x = split_x if is_left_col else page.rect.width
+        
+        # Define Vertical Search Area (Above the caption)
+        # Look up to 300 units above
+        search_area = fitz.Rect(col_min_x, max(0, caption_rect.y0 - 300), col_max_x, caption_rect.y0)
+        
+        # Filter drawings that stay WITHIN this specific column
+        drawings = []
+        for d in page.get_drawings():
+            d_rect = d["rect"]
+            
+            # Ignore page-sized backgrounds/borders/layout containers
+            # If a single drawing is very large (e.g. > 50% of page height), it's likely a container
+            if d_rect.width > page.rect.width * 0.9 or d_rect.height > page.rect.height * 0.5:
+                continue
+                
+            if (d_rect.intersects(search_area) and 
+                d_rect.x0 >= col_min_x and 
+                d_rect.x1 <= col_max_x):
+                drawings.append(d_rect)
+        
+        if not drawings:
+            return None
+            
+        # Merge all drawing rects
+        diagram_box = drawings[0]
+        for d_rect in drawings[1:]:
+            diagram_box |= d_rect
+            
+        # Add padding
+        return diagram_box + (-5, -5, 5, 5)
+
+    def _extract_images_and_diagrams(self, page, page_number: int, split_x: float) -> List[Dict[str, Any]]:
+        """Extract images and diagrams based on captions."""
+        images = []
+        blocks = page.get_text("blocks")
+        
+        # Regular expressions for captions
+        caption_patterns = [
+            r'^Fig(?:ure)?\.?\s*(\d+(?:\.\d+)?)',  # Fig. 1.1 or Figure 1.1
+            r'^Table\s*(\d+(?:\.\d+)?)',           # Table 1.1 (though usually tables are handled separately)
+        ]
+        
+        for block in blocks:
+            text = block[4].strip()
+            # Check if block is a caption
+            is_caption = False
+            match = None
+            
+            for pattern in caption_patterns:
+                match = re.search(pattern, text, re.IGNORECASE)
+                if match:
+                    is_caption = True
+                    break
+            
+            if is_caption and match:
+                # It's a caption, look for the diagram above it
+                bbox = self._get_diagram_bbox(page, block, split_x)
+                
+                if bbox:
+                    # Generate ID
+                    fig_id = match.group(1).replace('.', '_')
+                    image_filename = f"fig_{fig_id}_p{page_number}.png"
+                    image_path = self.output_dir / "images" / image_filename
+                    image_path.parent.mkdir(parents=True, exist_ok=True)
+                    
+                    # Save image
+                    # Use higher zoom for quality
+                    pix = page.get_pixmap(clip=bbox, matrix=fitz.Matrix(3, 3))
+                    pix.save(str(image_path))
+                    
+                    images.append({
+                        'image_id': f"fig_{fig_id}",
+                        'image_path': str(image_path),
+                        'image_type': 'diagram',
+                        'description': text,  # Caption is the description
+                        'page_number': page_number,
+                        'bbox': [bbox.x0, bbox.y0, bbox.x1, bbox.y1]
+                    })
+                    logger.info(f"Extracted diagram {fig_id} from page {page_number}")
+
+        return images
+
+    def _extract_tables(self, page, page_number: int) -> List[Dict[str, Any]]:
+        """Extract tables using PyMuPDF's find_tables."""
+        tables_data = []
+        
+        # Find tables
+        tables = page.find_tables()
+        
+        for i, table in enumerate(tables):
+            # Extract content to Markdown
+            md_content = table.to_markdown()
+            
+            # Extract to CSV
+            import csv
+            import io
+            csv_output = io.StringIO()
+            writer = csv.writer(csv_output)
+            writer.writerows(table.extract())
+            csv_content = csv_output.getvalue()
+            
+            # Generate ID
+            table_id = f"table_p{page_number}_{i+1}"
+            
+            # Save table image for visual verification (optional)
+            # bbox = table.bbox
+            # ... coding to save image ...
+            
+            tables_data.append({
+                'table_id': table_id,
+                'table_path': '',  # Placeholder if we save image later
+                'markdown_content': md_content,
+                'csv_content': csv_content,
+                'num_rows': table.row_count,
+                'num_cols': table.col_count,
+                'has_header': table.header.external,
+                'page_number': page_number,
+                'bbox': [table.bbox[0], table.bbox[1], table.bbox[2], table.bbox[3]]
+            })
+            
+        return tables_data
+
     def extract_text(self, file_path: str) -> str:
         """
         Extract text using hybrid method.
@@ -212,3 +398,4 @@ class PDFExtractor:
             text_parts.append(page_data['text'])
         
         return '\n\n'.join(text_parts)
+
