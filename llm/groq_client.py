@@ -80,7 +80,15 @@ class GroqClient:
                 max_tokens=max_tokens or self.max_tokens
             )
             
-            return response.choices[0].message.content
+            return {
+                "content": response.choices[0].message.content,
+                "model": response.model,
+                "usage": {
+                    "prompt_tokens": response.usage.prompt_tokens,
+                    "completion_tokens": response.usage.completion_tokens,
+                    "total_tokens": response.usage.total_tokens
+                }
+            }
             
         except Exception as e:
             logger.error(f"Groq API error: {e}")
@@ -212,7 +220,15 @@ Please provide a comprehensive answer based on the context above."""
                 max_tokens=self.max_tokens
             )
             
-            return response.choices[0].message.content
+            return {
+                "content": response.choices[0].message.content,
+                "model": response.model,
+                "usage": {
+                    "prompt_tokens": response.usage.prompt_tokens,
+                    "completion_tokens": response.usage.completion_tokens,
+                    "total_tokens": response.usage.total_tokens
+                }
+            }
             
         except Exception as e:
             logger.error(f"Chat completion error: {e}")

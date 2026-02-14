@@ -100,10 +100,21 @@ analyze_pdf.py
 # Ad-hoc Tests
 test.py
 test_full_pipeline.py
+test_example13_ocr.py
+
+# Benchmarks
+local_benchmark.py
+local_benchmark_report.md
 
 # Temporary Outputs
+*.txt
+*.pdf
+commits.txt
 debug_output.txt
 debug_retrieval_output.txt
 debug_retrieval_output_full.txt
 pdf_analysis.txt
 example.txt
+example13_extraction.txt
+colab_benchmark_results.txt
+colab_benchmark_report.md

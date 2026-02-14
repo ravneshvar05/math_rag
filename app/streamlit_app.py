@@ -103,6 +103,14 @@ st.markdown("""
     .katex {
         font-size: 1.1em !important;
     }
+    .usage-info {
+        font-size: 0.8rem !important;
+        color: #888888 !important;
+        margin-top: 0.5rem;
+        font-style: italic;
+        border-top: 1px solid #eee;
+        padding-top: 0.3rem;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -186,6 +194,11 @@ for message in st.session_state.messages:
                         for img in src['images']:
                             if os.path.exists(img):
                                 st.image(img)
+        
+        # Display model and usage if assistant
+        if message["role"] == "assistant" and "model" in message and "usage" in message:
+            u = message["usage"]
+            st.markdown(f"<div class='usage-info'>🤖 {message['model']} | 🎫 {u['total_tokens']} tokens (P: {u['prompt_tokens']}, C: {u['completion_tokens']})</div>", unsafe_allow_html=True)
 
 # Chat Input
 if prompt := st.chat_input("Ask a question about your math textbooks..."):
@@ -231,8 +244,16 @@ if prompt := st.chat_input("Ask a question about your math textbooks..."):
             st.session_state.messages.append({
                 "role": "assistant",
                 "content": full_response,
-                "sources": sources
+                "sources": sources,
+                "model": response.get('model'),
+                "usage": response.get('usage')
             })
+            
+            # Display metadata for current message
+            if response.get('model') and response.get('usage'):
+                u = response['usage']
+                st.markdown(f"<div class='usage-info'>🤖 {response['model']} | 🎫 {u['total_tokens']} tokens (P: {u['prompt_tokens']}, C: {u['completion_tokens']})</div>", unsafe_allow_html=True)
+
             
         except Exception as e:
             st.error(f"Error generating response: {e}")

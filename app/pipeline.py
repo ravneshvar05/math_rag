@@ -213,7 +213,8 @@ class MathRAGPipeline:
         
         # Generate answer
         logger.info("Generating answer...")
-        answer = self.llm_client.generate_with_context(query, context_chunks)
+        llm_response = self.llm_client.generate_with_context(query, context_chunks)
+        answer = llm_response['content']
         
         # Post-process answer to ensure clean formatting
         answer = self._post_process_answer(answer)
@@ -221,6 +222,8 @@ class MathRAGPipeline:
         # Prepare response
         response = {
             'answer': answer,
+            'model': llm_response.get('model'),
+            'usage': llm_response.get('usage'),
             'sources': [
                 {
                     'chunk_id': r.chunk.chunk_id,
