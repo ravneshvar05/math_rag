@@ -169,7 +169,7 @@ def get_image_base64(image_path):
     except Exception as e:
         return None
 
-def render_visuals(sources):
+def render_visuals(sources, show_generated_only=False):
     """Helper to render unique visuals from sources using HTML/CSS."""
     if not sources:
         return
@@ -182,8 +182,8 @@ def render_visuals(sources):
     
     if has_visuals:
         for src in sources:
-            # Show images
-            if src.get('images'):
+            # Show images - ONLY if not suppressed
+            if src.get('images') and not show_generated_only:
                 for img_path in src['images']:
                     if img_path not in unique_images and os.path.exists(img_path):
                         unique_images.add(img_path)
@@ -198,7 +198,7 @@ def render_visuals(sources):
                             '''
                             st.markdown(html, unsafe_allow_html=True)
             
-            # Show tables
+            # Show tables (always show tables if relevant)
             if src.get('tables'):
                 for tbl_path in src['tables']:
                     if tbl_path not in unique_tables:
@@ -272,8 +272,23 @@ for message in st.session_state.messages:
         st.markdown(message["content"])
         
         # Display images directly in chat
-        if message["role"] == "assistant" and "sources" in message:
-            render_visuals(message["sources"])
+        if message["role"] == "assistant":
+            # Show generated plot from history
+            if "generated_plot" in message and message["generated_plot"]:
+                 plot_path = message["generated_plot"]
+                 if os.path.exists(plot_path):
+                    b64_plot = get_image_base64(plot_path)
+                    if b64_plot:
+                         html = f'''
+                            <div class="rag-image-container">
+                                <img src="data:image/png;base64,{b64_plot}" alt="Generated Plot">
+                            </div>
+                            <div class="rag-caption">AI Generated Visualization</div>
+                        '''
+                         st.markdown(html, unsafe_allow_html=True)
+
+            if "sources" in message:
+                render_visuals(message["sources"])
 
         if "sources" in message:
             with st.expander("View Sources"):
@@ -319,8 +334,27 @@ if prompt := st.chat_input("Ask a question about your math textbooks..."):
                 message_placeholder.markdown(answer)
                 full_response = answer
                 
-                # Show visuals directly
-                render_visuals(sources)
+                # Show generated plot if available
+                has_generated_plot = False
+                if response.get('generated_plot'):
+                    plot_path = response['generated_plot']
+                    if os.path.exists(plot_path):
+                        has_generated_plot = True
+                        # Use base64 for consistency with other images
+                        b64_plot = get_image_base64(plot_path)
+                        if b64_plot:
+                             html = f'''
+                                <div class="rag-image-container">
+                                    <img src="data:image/png;base64,{b64_plot}" alt="Generated Plot">
+                                </div>
+                                <div class="rag-caption">AI Generated Visualization based on context</div>
+                            '''
+                             st.markdown(html, unsafe_allow_html=True)
+
+                # Show visuals directly - Suppress retrieved images if we generated a specific one
+                # to avoid confusion, unless user wants to see everything.
+                # User complaint: "shoed me the a exctraded image which is not nedde" -> so we suppress.
+                render_visuals(sources, show_generated_only=has_generated_plot)
                 
                 # Show sources
                 if sources:
@@ -333,6 +367,7 @@ if prompt := st.chat_input("Ask a question about your math textbooks..."):
                 "role": "assistant",
                 "content": full_response,
                 "sources": sources,
+                "generated_plot": response.get('generated_plot'),
                 "model": response.get('model'),
                 "usage": response.get('usage')
             })

@@ -53,6 +53,7 @@ class MathRAGPipeline:
         self.llm_client: Optional[GroqClient] = None
         self.retriever: Optional[HybridRetriever] = None
         self.retrieval_pipeline: Optional[RetrievalPipeline] = None
+        self.plot_generator: Any = None # Initialize plot generator
         
         logger.info("Pipeline initialized")
     
@@ -228,6 +229,40 @@ class MathRAGPipeline:
         llm_response = self.llm_client.generate_with_context(query, context_chunks)
         answer = llm_response['content']
         
+        # Check for plot code
+        generated_plot_path = None
+        if True: # Robust detection enabled
+            try:
+                import re
+                code_matches = list(re.finditer(r"```python(.*?)```", answer, re.DOTALL))
+                if code_matches:
+                    for match in code_matches:
+                        plot_code = match.group(1).strip()
+                        
+                        # Robust check: is this a plot?
+                        if "# PLOT" in match.group(0) or "plt." in plot_code or "matplotlib" in plot_code or "seaborn" in plot_code:
+                            logger.info("Detected plot code. Executing...")
+                            
+                            if not self.plot_generator:
+                                 from utils.plot_generator import PlotGenerator
+                                 plot_dir = self.config.processed_dir.parent / "generated_plots"
+                                 self.plot_generator = PlotGenerator(plot_dir)
+                            
+                            generated_plot_path = self.plot_generator.execute_plot_code(plot_code)
+                            
+                            if generated_plot_path:
+                                # Remove the code block from the final answer to keep keywords clean
+                                answer = answer.replace(match.group(0), "")
+                                
+                                # Clean up any Double Newlines left behind
+                                answer = answer.replace("\n\n\n", "\n\n")
+                                
+                                # Break after first successful plot to avoid multiple plots mess
+                                break
+            except Exception as e:
+                logger.error(f"Failed to generate plot: {e}")
+
+
         # Post-process answer to ensure clean formatting
         answer = self._post_process_answer(answer)
         
@@ -257,6 +292,7 @@ class MathRAGPipeline:
             'model': llm_response.get('model'),
             'usage': llm_response.get('usage'),
             'sources': source_list,
+            'generated_plot': generated_plot_path,
             'confidence': results[0].score if results else 0.0
         }
         
