@@ -63,10 +63,24 @@ class StructureAwareChunker:
             'images': []
         }
         
+        # Initialize ContentParser if not present
+        from extraction.content_parser import ContentParser
+        parser = ContentParser({}) # Empty config is fine for just regex
+
         for page_idx, page in enumerate(pages):
             page_num = page.get('page_number', page_idx + 1)
             page_text = page.get('text', '')
             blocks = page.get('blocks', [])
+
+            # Update Chapter info at the START of page processing
+            # This ensures page 1 of Chapter 1 is correctly labeled
+            chapter_info = parser._detect_chapter(page_text, page_num)
+            if chapter_info:
+                current_chapter = {
+                    'number': chapter_info['number'], 
+                    'name': chapter_info['name']
+                }
+                logger.info(f"Detected Chapter {current_chapter['number']}: {current_chapter['name']} on page {page_num}")
             
             # Retrieve page-level images and tables
             current_page_images = page.get('images', [])
@@ -95,9 +109,9 @@ class StructureAwareChunker:
             # Concepts / Breaks (Theorem, Definition, Section)
             # These break the current exercise flow but start a 'text' chunk
             for m in re.finditer(r'Theorem\s+(\d+)', page_text, re.IGNORECASE):
-                 headers.append({'pos': m.start(), 'type': 'theorem', 'match': m})
+                headers.append({'pos': m.start(), 'type': 'theorem', 'match': m})
             for m in re.finditer(r'Definition\s+(\d+)', page_text, re.IGNORECASE):
-                 headers.append({'pos': m.start(), 'type': 'definition', 'match': m})
+                headers.append({'pos': m.start(), 'type': 'definition', 'match': m})
             for m in re.finditer(r'^\s*\d+\.\d+\s+[A-Z]', page_text, re.MULTILINE): # Section like "3.2 Trigonometric Functions"
                  headers.append({'pos': m.start(), 'type': 'section', 'match': m})
 
@@ -115,11 +129,6 @@ class StructureAwareChunker:
                     # Logic: If collecting exercise, append to it. Else create text chunk.
                     if collecting_exercise:
                         exercise_buffer['text'] += '\n\n' + segment_text
-                        # Collect images for this segment
-                        # (Simplified: verify if images fall in this segment range if we had bbox, 
-                        # for now adding all page images to current buffer is acceptable as per previous logic,
-                        # but ideally we should match pos. Let's stick to page-level accumulation for safety)
-                         # Accumulate images in buffer
                         for img in current_page_images:
                             if not any(existing['image_id'] == img['image_id'] for existing in exercise_buffer['images']):
                                 exercise_buffer['images'].append(img)
@@ -139,9 +148,7 @@ class StructureAwareChunker:
                             chunks.append(chunk)
                 
                 # Close previous collection if this header breaks it
-                # All headers identified break the previous flow (start of new entity)
                 if collecting_exercise:
-                    # Stop collecting and save
                     collection_chunks = self._create_collection_chunk(
                         exercise_buffer,
                         document_id,
@@ -161,25 +168,17 @@ class StructureAwareChunker:
                 
                 if hdr_type == 'exercise':
                     exercise_buffer = {
-                        'text': page_text[header['pos']:], # Init with rest of page (will be sliced next iter) -> No, Wait.
-                        # We need to buffer ONLY the header text? No.
-                        # The Logic "Segment text before header" handles the *previous* body.
-                        # Now we need to setup the state for the *next* body (which starts at header['pos']).
-                        # The loop continues, and the NEXT header will define the end of THIS body.
-                        # If there is no next header, the "Tail" logic handles it.
+                        'text': page_text[header['pos']:], 
                         'number': match.group(1),
                         'start_page': page_num,
                         'type': 'exercise',
                         'images': []
                     }
-                    # Init images
                     exercise_buffer['images'].extend(current_page_images) 
                     collecting_exercise = True
-                    logger.info(f"Started collecting Exercise {header['match'].group(1)} from page {page_num}")
-                    
                 elif hdr_type == 'example':
                     exercise_buffer = {
-                        'text': '', # Will be filled by next segment
+                        'text': '',
                         'number': match.group(1),
                         'start_page': page_num,
                         'type': 'example',
@@ -187,8 +186,6 @@ class StructureAwareChunker:
                     }
                     exercise_buffer['images'].extend(current_page_images)
                     collecting_exercise = True
-                    logger.info(f"Started collecting Example {header['match'].group(1)} from page {page_num}")
-                    
                 elif hdr_type == 'miscellaneous':
                      exercise_buffer = {
                         'text': '',
@@ -199,12 +196,6 @@ class StructureAwareChunker:
                     }
                      exercise_buffer['images'].extend(current_page_images)
                      collecting_exercise = True
-                     logger.info(f"Started collecting Miscellaneous from page {page_num}")
-                
-                # For Concepts (Theorem, Definition, Section), we don't start `collecting_exercise`.
-                # We just leave `collecting_exercise = False`.
-                # The text following this (Segment i+1) will be caught by `else: Create standalone text chunk`? 
-                # OR we handle it in the Tail.
                 
                 current_pos = header['pos']
                 
@@ -217,21 +208,12 @@ class StructureAwareChunker:
                         if not any(existing['image_id'] == img['image_id'] for existing in exercise_buffer['images']):
                             exercise_buffer['images'].append(img)
                 else:
-                    # Independent text chunk (Concepts, etc.)
-                    # Use existing _chunk_page logic but for just this text segment?
-                    # Or _create_simple_chunk directly.
-                    # To reuse _chunk_page logic (splitting large text), we can call it on a dummy page dict.
                     dummy_page = page.copy()
                     dummy_page['text'] = tail_text
                     page_chunks = self._chunk_page(
                         dummy_page, document_id, class_level, current_chapter, current_section
                     )
                     chunks.extend(page_chunks)
-
-            # Update Chapter/Section info if found (Checking whole page text is fine for this)
-            chapter_match = re.search(r'CHAPTER\s+(\d+)', page_text, re.IGNORECASE)
-            if chapter_match:
-                current_chapter = {'number': int(chapter_match.group(1)), 'name': 'Chapter ' + chapter_match.group(1)}
         
         # End of Loop (Pages)
         

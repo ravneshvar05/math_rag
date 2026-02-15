@@ -71,19 +71,33 @@ class ContentParser:
         return structure
     
     def _detect_chapter(self, text: str, page_num: int) -> Optional[Dict[str, Any]]:
-        """Detect chapter heading."""
+        """Detect chapter heading with Improved multiline support."""
+        # Clean text for regex
+        text_clean = text.strip()
+        
         patterns = [
-            r'CHAPTER\s+(\d+)\s*[:\-]?\s*([^\n]+)',
-            r'Chapter\s+(\d+)\s*[:\-]?\s*([^\n]+)',
-            r'(\d+)\.\s+([A-Z][^\n]{10,50})',  # Numbered heading
+            # Pattern 1: "CHAPTER 1\n\nSETS" (Multiline)
+            r'CHAPTER\s+(\d+)\s*\n+\s*([^\n]{2,100})',
+            # Pattern 2: "Chapter 1: Sets" (Inline)
+            r'Chapter\s+(\d+)\s*[:\-]?\s*([^\n]{2,100})',
+            # Pattern 3: Numbered heading "1. SETS"
+            r'^(\d+)\.\s+([A-Z][^\n]{5,50})',
         ]
         
         for pattern in patterns:
-            match = re.search(pattern, text, re.IGNORECASE)
+            # Using IGNORECASE and DOTALL if needed, but here simple search works best
+            match = re.search(pattern, text_clean, re.IGNORECASE)
             if match:
+                num = int(match.group(1))
+                name = match.group(2).strip()
+                
+                # Validation: if name is just numbers or too short, it might be a false positive
+                if len(name) < 2:
+                    continue
+                    
                 return {
-                    'number': int(match.group(1)),
-                    'name': match.group(2).strip(),
+                    'number': num,
+                    'name': name,
                     'start_page': page_num
                 }
         

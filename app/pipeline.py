@@ -216,7 +216,7 @@ class MathRAGPipeline:
         # Initialize components
         self._init_query_components()
         
-        # Retrieve relevant chunks
+        # 1. Retrieve relevant chunks
         results = self.retrieval_pipeline.search(
             query=query,
             top_k=top_k,
@@ -224,14 +224,19 @@ class MathRAGPipeline:
             chapter_number=chapter_number
         )
         
-        if not results:
-            return {
-                'answer': "I couldn't find relevant information in the textbook to answer your question.",
-                'sources': [],
-                'confidence': 0.0
-            }
-        
-        # Smart Filter: Only keep images from HIGH relevance chunks
+        # 2. Metadata Awareness Injection
+        # If user asks about "available chapters" or "what documents", inject full library info
+        library_context = ""
+        if any(word in query.lower() for word in ["chapter", "available", "what do you have", "list", "summary", "textbook"]):
+            docs = self.list_documents()
+            if docs:
+                library_context = "\n[SYSTEM: GLOBAL LIBRARY METADATA]\n"
+                for doc in docs:
+                    library_context += f"- Document: {doc['document_id']} (Class {doc['class_level']})\n"
+                    library_context += f"  Chapters: {', '.join(doc['chapters'])}\n"
+                library_context += "[END LIBRARY METADATA]\n\n"
+
+        # 3. Smart Filter: Only keep images from HIGH relevance chunks
         # This prevents images from "semi-relevant" chunks (rank 4-5) from polluting context/UI
         best_score = results[0].score
         score_threshold = best_score * 0.9  # strict 90% threshold relative to best match
@@ -247,7 +252,17 @@ class MathRAGPipeline:
         
         # Generate answer
         logger.info("Generating answer...")
-        llm_response = self.llm_client.generate_with_context(query, context_chunks)
+        
+        # Combine retrieval context with library metadata if present
+        llm_context = context_chunks
+        if library_context:
+            # We can prepend it as a special pseudo-chunk or just as a string hint
+            # Prepending a text hint is safer for the existing prompt structure
+            query_with_hint = library_context + query
+        else:
+            query_with_hint = query
+            
+        llm_response = self.llm_client.generate_with_context(query_with_hint, llm_context)
         answer = llm_response['content']
         
         # Check for plot code

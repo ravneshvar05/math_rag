@@ -46,6 +46,12 @@ data/tables/
 data/vector_store/
 data/*.json
 data/*.pkl
+data/generated_plots/
+data/processed_verification/
+data/processed_verification_v2/
+img/
+tests/output/
+benchmarks/cache/
 
 # Logs
 logs/*.log
@@ -102,6 +108,26 @@ demo.py
 test.py
 test_full_pipeline.py
 test_example13_ocr.py
+test_chunking_logic.py
+test_chunking_logic_v2.py
+test_image_linking.py
+test_image_linking_v2.py
+test_splitting.py
+
+# New Debug & Verification Scripts
+analyze_token_spike.py
+debug_drawings.py
+debug_example13_extraction.py
+debug_page_11.py
+debug_retrieval_v2.py
+debug_retrieval_v3.py
+debug_retrieval_v4.py
+inspect_chunks.py
+inspect_metadata.py
+run_extraction_final.py
+verify_logic_only.py
+verify_pipeline.py
+verify_prompt.py
 
 # Benchmarks
 local_benchmark.py
