@@ -128,11 +128,11 @@ class GroqClient:
             context_parts.append(f"Type: {chunk['content_type']}")
             context_parts.append(f"\nContent:\n{chunk['text_content']}")
             
-            # Add equations
-            if chunk.get('equations'):
-                context_parts.append("\nEquations:")
-                for eq in chunk['equations']:
-                    context_parts.append(f"  {eq}")
+            # Add equations (Redundant - already in text)
+            # if chunk.get('equations'):
+            #     context_parts.append("\nEquations:")
+            #     for eq in chunk['equations']:
+            #         context_parts.append(f"  {eq}")
             
             # Add images
             if chunk.get('images'):
@@ -140,8 +140,7 @@ class GroqClient:
                 for img in chunk['images']:
                     if img.get('description'):
                         context_parts.append(f"  - {img['description']}")
-                    if img.get('path'):
-                        context_parts.append(f"    Image: {img['path']}")
+                    # Removed file path to save tokens - LLM cannot see local files
             
             # Add tables
             if chunk.get('tables'):

@@ -59,7 +59,8 @@ class StructureAwareChunker:
             'text': '',
             'number': '',
             'start_page': 0,
-            'type': 'exercise'  # or 'example'
+            'type': 'exercise',  # or 'example'
+            'images': []
         }
         
         for page_idx, page in enumerate(pages):
@@ -79,19 +80,18 @@ class StructureAwareChunker:
             if exercise_match or example_match:
                 # Save previous collection if exists
                 if collecting_exercise and exercise_buffer['text']:
-                    chunk = self._create_collection_chunk(
+                    collection_chunks = self._create_collection_chunk(
                         exercise_buffer,
                         document_id,
                         class_level,
                         current_chapter,
                         current_section,
-                        # Pass buffered images (simplified: passing current page images for now, 
-                        # ideally we'd buffer images too or link based on page_number later)
-                        page_images=current_page_images, 
+                        # Pass buffered images
+                        page_images=exercise_buffer['images'], 
                         page_tables=current_page_tables
                     )
-                    if chunk:
-                        chunks.append(chunk)
+                    if collection_chunks:
+                        chunks.extend(collection_chunks)
                 
                 # Start new collection
                 if exercise_match:
@@ -99,8 +99,11 @@ class StructureAwareChunker:
                         'text': page_text,
                         'number': exercise_match.group(1),
                         'start_page': page_num,
-                        'type': 'exercise'
+                        'type': 'exercise',
+                        'images': []
                     }
+                    # Init images with current page's images
+                    exercise_buffer['images'].extend(current_page_images)
                     collecting_exercise = True
                     logger.info(f"Started collecting Exercise {exercise_match.group(1)} from page {page_num}")
                     
@@ -109,8 +112,11 @@ class StructureAwareChunker:
                         'text': page_text,
                         'number': example_match.group(1),
                         'start_page': page_num,
-                        'type': 'example'
+                        'type': 'example',
+                        'images': []
                     }
+                    # Init images with current page's images
+                    exercise_buffer['images'].extend(current_page_images)
                     collecting_exercise = True
                     logger.info(f"Started collecting Example {example_match.group(1)} from page {page_num}")
             
@@ -119,26 +125,30 @@ class StructureAwareChunker:
                 # Check if we've hit a new major section
                 if re.search(r'(MISCELLANEOUS|SUMMARY|CHAPTER)', page_text, re.IGNORECASE):
                     # Stop collecting and save
-                    chunk = self._create_collection_chunk(
+                    # Stop collecting and save
+                    collection_chunks = self._create_collection_chunk(
                         exercise_buffer,
                         document_id,
                         class_level,
                         current_chapter,
                         current_section,
-                        page_images=current_page_images,
+                        page_images=exercise_buffer['images'],
                         page_tables=current_page_tables
                     )
-                    if chunk:
-                        chunks.append(chunk)
+                    if collection_chunks:
+                        chunks.extend(collection_chunks)
                     collecting_exercise = False
                 else:
                     # Add to buffer
                     exercise_buffer['text'] += '\n\n' + page_text
                     
+                     
                     # Also need to consider how to accrue images across pages for multi-page exercises
-                    # For now, we're passing current page's images when we CLOSE the chunk.
-                    # This is imperfect for multi-page exercises where image was on first page.
-                    # Ideally, we should accumulate images in exercise_buffer.
+                    # Accumulate images in buffer
+                    for img in current_page_images:
+                        # Avoid duplicates
+                        if not any(existing['image_id'] == img['image_id'] for existing in exercise_buffer['images']):
+                            exercise_buffer['images'].append(img)
             
             else:
                 # Regular chunking for non-exercise/example content
@@ -158,15 +168,16 @@ class StructureAwareChunker:
         
         # Save any remaining collection
         if collecting_exercise and exercise_buffer['text']:
-            chunk = self._create_collection_chunk(
+            collection_chunks = self._create_collection_chunk(
                 exercise_buffer,
                 document_id,
                 class_level,
                 current_chapter,
-                current_section
+                current_section,
+                page_images=exercise_buffer['images']
             )
-            if chunk:
-                chunks.append(chunk)
+            if collection_chunks:
+                chunks.extend(collection_chunks)
         
         logger.info(f"Created {len(chunks)} chunks from document (with smart grouping)")
         return chunks
@@ -266,38 +277,170 @@ class StructureAwareChunker:
         section: Dict[str, Any],
         page_images: List[Dict[str, Any]] = None,
         page_tables: List[Dict[str, Any]] = None
-    ) -> Optional[ContentChunk]:
-        """Create a chunk from collected exercise/example content."""
+    ) -> List[ContentChunk]:
+        """Create chunks from collected exercise/example content with smart splitting."""
         if not buffer['text'].strip():
-            return None
+            return []
         
         chunk_type = ContentType.EXERCISE if buffer['type'] == 'exercise' else ContentType.EXAMPLE
         
-        # Extract equations from text
-        equations = self.math_detector.extract_equations(buffer['text'])
+        # Calculate size limit (approx chars: tokens * 4)
+        # Using factor 3.5 to be safe
+        max_chars = self.max_tokens * 3.5
         
-        chunk = ContentChunk(
-            chunk_id=str(uuid.uuid4()),
-            document_id=document_id,
-            class_level=class_level,
-            chapter_number=chapter.get('number', 0),
-            chapter_name=chapter.get('name', ''),
-            section_name=section.get('name', ''),
-            content_type=chunk_type,
-            text_content=buffer['text'],
-            page_number=buffer['start_page'],
-            latex_equations=equations,
-            images=[],
-            tables=[],
-            example_number=buffer['number'] if buffer['type'] == 'example' else None,
-            exercise_number=buffer['number'] if buffer['type'] == 'exercise' else None
-        )
+        text = buffer['text']
+        total_len = len(text)
         
-        # Apply Smart Linking
-        if page_images or page_tables:
-            self._link_content_to_chunk(chunk, page_images or [], page_tables or [])
+        # If small enough, create single chunk
+        if total_len <= max_chars:
+            equations = self.math_detector.extract_equations(text)
+            chunk = ContentChunk(
+                chunk_id=str(uuid.uuid4()),
+                document_id=document_id,
+                class_level=class_level,
+                chapter_number=chapter.get('number', 0),
+                chapter_name=chapter.get('name', ''),
+                section_name=section.get('name', ''),
+                content_type=chunk_type,
+                text_content=text,
+                page_number=buffer['start_page'],
+                latex_equations=equations,
+                images=[],
+                tables=[],
+                example_number=buffer['number'] if buffer['type'] == 'example' else None,
+                exercise_number=buffer['number'] if buffer['type'] == 'exercise' else None
+            )
+            # Link images
+            if page_images or page_tables:
+                self._link_content_to_chunk(chunk, page_images or [], page_tables or [])
+            return [chunk]
+            
+        # If too large, split by paragraphs
+        logger.info(f"Splitting large collection chunk ({total_len} chars) for {buffer['type']} {buffer['number']}")
         
-        return chunk
+        paragraphs = text.split('\n\n')
+        chunks = []
+        current_chunk_text = ""
+        part_num = 1
+        
+        for para in paragraphs:
+            if not para.strip():
+                continue
+                
+            if len(current_chunk_text) + len(para) > max_chars and current_chunk_text:
+                # Finalize current chunk
+                equations = self.math_detector.extract_equations(current_chunk_text)
+                
+                # Add context header for parts > 1 if missing
+                final_text = current_chunk_text
+                if part_num > 1 and f"{buffer['type']} {buffer['number']}".lower() not in final_text.lower()[:50]:
+                    final_text = f"[{buffer['type'].capitalize()} {buffer['number']} (Part {part_num})]\n\n" + final_text
+                
+                chunk = ContentChunk(
+                    chunk_id=str(uuid.uuid4()),
+                    document_id=document_id,
+                    class_level=class_level,
+                    chapter_number=chapter.get('number', 0),
+                    chapter_name=chapter.get('name', ''),
+                    section_name=section.get('name', ''),
+                    content_type=chunk_type,
+                    text_content=final_text,
+                    page_number=buffer['start_page'], # Approximate page
+                    latex_equations=equations,
+                    images=[],
+                    tables=[],
+                    example_number=buffer['number'] if buffer['type'] == 'example' else None,
+                    exercise_number=buffer['number'] if buffer['type'] == 'exercise' else None
+                )
+                
+                # Link images - link ALL collected images to ALL parts for safety
+                # (Smart linking inside _link_content_to_chunk will filter by ref if found, 
+                # but we want to ensure availability)
+                if page_images or page_tables:
+                     self._link_content_to_chunk(chunk, page_images or [], page_tables or [])
+                
+                chunks.append(chunk)
+                
+                current_chunk_text = para
+                part_num += 1
+            else:
+                current_chunk_text += '\n\n' + para if current_chunk_text else para
+                
+        # Final part
+        if current_chunk_text.strip():
+            equations = self.math_detector.extract_equations(current_chunk_text)
+            final_text = current_chunk_text
+            if part_num > 1 and f"{buffer['type']} {buffer['number']}".lower() not in final_text.lower()[:50]:
+                final_text = f"[{buffer['type'].capitalize()} {buffer['number']} (Part {part_num})]\n\n" + final_text
+            
+            chunk = ContentChunk(
+                chunk_id=str(uuid.uuid4()),
+                document_id=document_id,
+                class_level=class_level,
+                chapter_number=chapter.get('number', 0),
+                chapter_name=chapter.get('name', ''),
+                section_name=section.get('name', ''),
+                content_type=chunk_type,
+                text_content=final_text,
+                page_number=buffer['start_page'],
+                latex_equations=equations,
+                images=[],
+                tables=[],
+                example_number=buffer['number'] if buffer['type'] == 'example' else None,
+                exercise_number=buffer['number'] if buffer['type'] == 'exercise' else None
+            )
+            if page_images or page_tables:
+                 self._link_content_to_chunk(chunk, page_images or [], page_tables or [])
+            chunks.append(chunk)
+
+        # -------------------------------------------------------------------------
+        # ORPHAN RESCUE STRATEGY
+        # -------------------------------------------------------------------------
+        # Check if any images in our collected buffer were NOT linked to any chunk.
+        # This happens if the text didn't explicitly say "Fig X".
+        
+        if page_images:
+            # 1. Gather all linked image IDs across all generated chunks
+            linked_image_ids = set()
+            for c in chunks:
+                for img in c.images:
+                    linked_image_ids.add(img.image_id)
+            
+            # 2. Find orphans
+            orphans = [img for img in page_images if img['image_id'] not in linked_image_ids]
+            
+            if orphans:
+                logger.info(f"Found {len(orphans)} orphaned images. Attempting rescue...")
+                from utils.schema import ImageData, ImageType
+                
+                for orphan in orphans:
+                    # 3. Rescue: Assign to chunks on the SAME PAGE
+                    # If multiple chunks are on the same page, assign to the LAST one (usually where the exercise text is)
+                    # or ALL of them? Let's assign to ALL chunks on that page to be safe.
+                    orphan_page = orphan['page_number']
+                    target_chunks = [c for c in chunks if c.page_number == orphan_page]
+                    
+                    if target_chunks:
+                        # Create Image Object
+                        img_obj = ImageData(
+                            image_id=orphan['image_id'],
+                            image_path=orphan['image_path'],
+                            image_type=ImageType.DIAGRAM,
+                            description=orphan.get('description', ''),
+                            page_number=orphan['page_number'],
+                            bbox=orphan.get('bbox')
+                        )
+                        
+                        # Link to target chunks
+                        for tc in target_chunks:
+                            if not any(i.image_id == img_obj.image_id for i in tc.images):
+                                tc.images.append(img_obj)
+                                logger.debug(f"Rescue: Linked orphan {orphan['image_id']} to chunk {tc.chunk_id}")
+                    else:
+                        logger.warning(f"Could not rescue orphan {orphan['image_id']} (Page {orphan_page}) - no chunks on this page.")
+
+        logger.info(f"Split collection into {len(chunks)} parts")
+        return chunks
     
     def _chunk_page(
         self,
