@@ -82,29 +82,41 @@ class MathRAGPipeline:
         # Initialize components
         self._init_indexing_components()
         
+        # High-level progress tracking
+        from tqdm import tqdm
+        steps_pbar = tqdm(total=8, desc="Overall Indexing Progress")
+
         # Step 1: Extract PDF content
         logger.info("Step 1: Extracting PDF content...")
+        steps_pbar.set_description("Step 1/8: Extracting PDF content")
         extractor = PDFExtractor(str(pdf_path), str(self.config.processed_dir))
         extraction_result = extractor.extract_all()
+        steps_pbar.update(1)
         
         # Step 2: Process images and tables
         logger.info("Step 2: Processing visual content...")
+        steps_pbar.set_description("Step 2/8: Processing visual content")
         self._process_images(extraction_result['images'])
         self._process_tables(extraction_result['tables'])
+        steps_pbar.update(1)
         
         # Step 3: Parse content structure
         logger.info("Step 3: Parsing document structure...")
+        steps_pbar.set_description("Step 3/8: Parsing document structure")
         structured_content = self.content_parser.parse_document_structure(
             extraction_result['pages']
         )
+        steps_pbar.update(1)
         
         # Step 4: Create chunks
         logger.info("Step 4: Creating structured chunks...")
+        steps_pbar.set_description("Step 4/8: Creating structured chunks")
         chunks = self.chunker.chunk_document(
             extraction_result['pages'],
             document_id,
             class_level
         )
+        steps_pbar.update(1)
         
         if not chunks:
             logger.warning("No chunks created from document. Checking extraction results...")
@@ -125,20 +137,27 @@ class MathRAGPipeline:
 
         # Step 5: Generate embeddings
         logger.info("Step 5: Generating embeddings...")
+        steps_pbar.set_description("Step 5/8: Generating embeddings")
         embeddings_dict = self.embedding_generator.embed_chunks(chunks)
+        steps_pbar.update(1)
         
         # Step 6: Store in vector store
         logger.info("Step 6: Storing in vector database...")
+        steps_pbar.set_description("Step 6/8: Storing in vector database")
         chunk_ids = list(embeddings_dict.keys())
         embeddings_array = np.array([embeddings_dict[cid] for cid in chunk_ids])
         self.vector_store.add_embeddings(embeddings_array, chunk_ids)
+        steps_pbar.update(1)
         
         # Step 7: Store metadata
         logger.info("Step 7: Storing metadata...")
+        steps_pbar.set_description("Step 7/8: Storing metadata")
         self.metadata_store.add_chunks(chunks)
+        steps_pbar.update(1)
         
         # Step 8: Build Keyword Index (BM25)
         logger.info("Step 8: Updating Keyword Index (BM25)...")
+        steps_pbar.set_description("Step 8/8: Updating Keyword Index (BM25)")
         # We need to initialize the retriever component to access the keyword retriever
         # OR just instantiate a temporary one if we don't want to load the whole retrieval pipeline
         from retrieval.keyword_retriever import KeywordRetriever
@@ -153,6 +172,8 @@ class MathRAGPipeline:
         # Ideally, we should fetch all chunks from metadata store.
         all_chunks = self.metadata_store.filter_chunks() # Get everything
         kw_retriever.index_chunks(all_chunks)
+        steps_pbar.update(1)
+        steps_pbar.close()
         
         # Save
         self._save_stores()

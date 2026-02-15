@@ -7,6 +7,8 @@ import re
 import pytesseract
 from PIL import Image
 import io
+from tqdm import tqdm
+
 
 logger = get_logger(__name__)
 
@@ -38,7 +40,8 @@ class PDFExtractor:
             'total_pages': len(doc)
         }
         
-        for page_num, page in enumerate(doc):
+        pbar = tqdm(doc, desc=f"Extracting {Path(self.pdf_path).name}", unit="page")
+        for page_num, page in enumerate(pbar):
             # Detect layout
             split_x = self._detect_columns(page)
             

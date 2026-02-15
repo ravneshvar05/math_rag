@@ -351,10 +351,9 @@ if prompt := st.chat_input("Ask a question about your math textbooks..."):
                             '''
                              st.markdown(html, unsafe_allow_html=True)
 
-                # Show visuals directly - Suppress retrieved images if we generated a specific one
-                # to avoid confusion, unless user wants to see everything.
-                # User complaint: "shoed me the a exctraded image which is not nedde" -> so we suppress.
-                render_visuals(sources, show_generated_only=has_generated_plot)
+                # Show visuals directly - Do NOT suppress retrieved images even if we generated a specific one
+                # User wants to see both.
+                render_visuals(sources, show_generated_only=False)
                 
                 # Show sources
                 if sources:
