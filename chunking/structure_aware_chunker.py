@@ -72,59 +72,75 @@ class StructureAwareChunker:
             current_page_images = page.get('images', [])
             current_page_tables = page.get('tables', [])
             
-            # Check for exercise/example headers
-            exercise_match = re.search(r'EXERCISE\s+(\d+\.\d+)', page_text, re.IGNORECASE)
-            example_match = re.search(r'Example\s+(\d+)', page_text, re.IGNORECASE)
+            # -------------------------------------------------------------------------
+            # CONCEPT-AWARE PAGE SEGMENTATION
+            # -------------------------------------------------------------------------
+            # 1. Identify all headers on the page with their positions
+            # Headers: Exercise X.Y, Example N, Miscellaneous, Start of Chapter/Section, Theorem, Definition
             
-            # If we find a new exercise/example header
-            if exercise_match or example_match:
-                # Save previous collection if exists
-                if collecting_exercise and exercise_buffer['text']:
-                    collection_chunks = self._create_collection_chunk(
-                        exercise_buffer,
-                        document_id,
-                        class_level,
-                        current_chapter,
-                        current_section,
-                        # Pass buffered images
-                        page_images=exercise_buffer['images'], 
-                        page_tables=current_page_tables
-                    )
-                    if collection_chunks:
-                        chunks.extend(collection_chunks)
+            headers = []
+            
+            # Exercise
+            for m in re.finditer(r'EXERCISE\s+(\d+\.\d+)', page_text, re.IGNORECASE):
+                headers.append({'pos': m.start(), 'type': 'exercise', 'match': m})
                 
-                # Start new collection
-                if exercise_match:
-                    exercise_buffer = {
-                        'text': page_text,
-                        'number': exercise_match.group(1),
-                        'start_page': page_num,
-                        'type': 'exercise',
-                        'images': []
-                    }
-                    # Init images with current page's images
-                    exercise_buffer['images'].extend(current_page_images)
-                    collecting_exercise = True
-                    logger.info(f"Started collecting Exercise {exercise_match.group(1)} from page {page_num}")
-                    
-                elif example_match:
-                    exercise_buffer = {
-                        'text': page_text,
-                        'number': example_match.group(1),
-                        'start_page': page_num,
-                        'type': 'example',
-                        'images': []
-                    }
-                    # Init images with current page's images
-                    exercise_buffer['images'].extend(current_page_images)
-                    collecting_exercise = True
-                    logger.info(f"Started collecting Example {example_match.group(1)} from page {page_num}")
+            # Example
+            for m in re.finditer(r'Example\s+(\d+)', page_text, re.IGNORECASE):
+                headers.append({'pos': m.start(), 'type': 'example', 'match': m})
+                
+            # Miscellaneous
+            for m in re.finditer(r'Miscellaneous\s+(Exercise|Examples)', page_text, re.IGNORECASE):
+                headers.append({'pos': m.start(), 'type': 'miscellaneous', 'match': m})
+                
+            # Concepts / Breaks (Theorem, Definition, Section)
+            # These break the current exercise flow but start a 'text' chunk
+            for m in re.finditer(r'Theorem\s+(\d+)', page_text, re.IGNORECASE):
+                 headers.append({'pos': m.start(), 'type': 'theorem', 'match': m})
+            for m in re.finditer(r'Definition\s+(\d+)', page_text, re.IGNORECASE):
+                 headers.append({'pos': m.start(), 'type': 'definition', 'match': m})
+            for m in re.finditer(r'^\s*\d+\.\d+\s+[A-Z]', page_text, re.MULTILINE): # Section like "3.2 Trigonometric Functions"
+                 headers.append({'pos': m.start(), 'type': 'section', 'match': m})
+
+            # Sort headers by position
+            headers.sort(key=lambda x: x['pos'])
             
-            elif collecting_exercise:
-                # Continue collecting until we hit another exercise/example or significant break
-                # Check if we've hit a new major section
-                if re.search(r'(MISCELLANEOUS|SUMMARY|CHAPTER)', page_text, re.IGNORECASE):
-                    # Stop collecting and save
+            # 2. Process Segments
+            current_pos = 0
+            
+            for i, header in enumerate(headers):
+                # Segment: Text before this header
+                segment_text = page_text[current_pos:header['pos']].strip()
+                
+                if segment_text:
+                    # Logic: If collecting exercise, append to it. Else create text chunk.
+                    if collecting_exercise:
+                        exercise_buffer['text'] += '\n\n' + segment_text
+                        # Collect images for this segment
+                        # (Simplified: verify if images fall in this segment range if we had bbox, 
+                        # for now adding all page images to current buffer is acceptable as per previous logic,
+                        # but ideally we should match pos. Let's stick to page-level accumulation for safety)
+                         # Accumulate images in buffer
+                        for img in current_page_images:
+                            if not any(existing['image_id'] == img['image_id'] for existing in exercise_buffer['images']):
+                                exercise_buffer['images'].append(img)
+                    else:
+                        # Create standalone text chunk for this concept/text segment
+                        chunk = self._create_simple_chunk(
+                            segment_text,
+                            document_id,
+                            class_level,
+                            current_chapter,
+                            current_section,
+                            page_num
+                        )
+                        if chunk:
+                            if current_page_images or current_page_tables:
+                                self._link_content_to_chunk(chunk, current_page_images, current_page_tables)
+                            chunks.append(chunk)
+                
+                # Close previous collection if this header breaks it
+                # All headers identified break the previous flow (start of new entity)
+                if collecting_exercise:
                     # Stop collecting and save
                     collection_chunks = self._create_collection_chunk(
                         exercise_buffer,
@@ -138,33 +154,86 @@ class StructureAwareChunker:
                     if collection_chunks:
                         chunks.extend(collection_chunks)
                     collecting_exercise = False
-                else:
-                    # Add to buffer
-                    exercise_buffer['text'] += '\n\n' + page_text
                     
-                     
-                    # Also need to consider how to accrue images across pages for multi-page exercises
-                    # Accumulate images in buffer
+                # Start New State based on Header Type
+                match = header['match']
+                hdr_type = header['type']
+                
+                if hdr_type == 'exercise':
+                    exercise_buffer = {
+                        'text': page_text[header['pos']:], # Init with rest of page (will be sliced next iter) -> No, Wait.
+                        # We need to buffer ONLY the header text? No.
+                        # The Logic "Segment text before header" handles the *previous* body.
+                        # Now we need to setup the state for the *next* body (which starts at header['pos']).
+                        # The loop continues, and the NEXT header will define the end of THIS body.
+                        # If there is no next header, the "Tail" logic handles it.
+                        'number': match.group(1),
+                        'start_page': page_num,
+                        'type': 'exercise',
+                        'images': []
+                    }
+                    # Init images
+                    exercise_buffer['images'].extend(current_page_images) 
+                    collecting_exercise = True
+                    logger.info(f"Started collecting Exercise {header['match'].group(1)} from page {page_num}")
+                    
+                elif hdr_type == 'example':
+                    exercise_buffer = {
+                        'text': '', # Will be filled by next segment
+                        'number': match.group(1),
+                        'start_page': page_num,
+                        'type': 'example',
+                        'images': []
+                    }
+                    exercise_buffer['images'].extend(current_page_images)
+                    collecting_exercise = True
+                    logger.info(f"Started collecting Example {header['match'].group(1)} from page {page_num}")
+                    
+                elif hdr_type == 'miscellaneous':
+                     exercise_buffer = {
+                        'text': '',
+                        'number': 'Miscellaneous',
+                        'start_page': page_num,
+                        'type': 'exercise',
+                        'images': []
+                    }
+                     exercise_buffer['images'].extend(current_page_images)
+                     collecting_exercise = True
+                     logger.info(f"Started collecting Miscellaneous from page {page_num}")
+                
+                # For Concepts (Theorem, Definition, Section), we don't start `collecting_exercise`.
+                # We just leave `collecting_exercise = False`.
+                # The text following this (Segment i+1) will be caught by `else: Create standalone text chunk`? 
+                # OR we handle it in the Tail.
+                
+                current_pos = header['pos']
+                
+            # 3. Tail Segment (After last header)
+            tail_text = page_text[current_pos:].strip()
+            if tail_text:
+                if collecting_exercise:
+                    exercise_buffer['text'] += '\n\n' + tail_text
                     for img in current_page_images:
-                        # Avoid duplicates
                         if not any(existing['image_id'] == img['image_id'] for existing in exercise_buffer['images']):
                             exercise_buffer['images'].append(img)
-            
-            else:
-                # Regular chunking for non-exercise/example content
-                page_chunks = self._chunk_page(
-                    page,
-                    document_id,
-                    class_level,
-                    current_chapter,
-                    current_section
-                )
-                chunks.extend(page_chunks)
-            
-            # Update chapter and section if found
+                else:
+                    # Independent text chunk (Concepts, etc.)
+                    # Use existing _chunk_page logic but for just this text segment?
+                    # Or _create_simple_chunk directly.
+                    # To reuse _chunk_page logic (splitting large text), we can call it on a dummy page dict.
+                    dummy_page = page.copy()
+                    dummy_page['text'] = tail_text
+                    page_chunks = self._chunk_page(
+                        dummy_page, document_id, class_level, current_chapter, current_section
+                    )
+                    chunks.extend(page_chunks)
+
+            # Update Chapter/Section info if found (Checking whole page text is fine for this)
             chapter_match = re.search(r'CHAPTER\s+(\d+)', page_text, re.IGNORECASE)
             if chapter_match:
                 current_chapter = {'number': int(chapter_match.group(1)), 'name': 'Chapter ' + chapter_match.group(1)}
+        
+        # End of Loop (Pages)
         
         # Save any remaining collection
         if collecting_exercise and exercise_buffer['text']:
@@ -179,7 +248,7 @@ class StructureAwareChunker:
             if collection_chunks:
                 chunks.extend(collection_chunks)
         
-        logger.info(f"Created {len(chunks)} chunks from document (with smart grouping)")
+        logger.info(f"Created {len(chunks)} chunks from document (with concept-aware segmentation)")
         return chunks
     
     def _link_content_to_chunk(
